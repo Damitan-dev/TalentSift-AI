@@ -28,337 +28,137 @@ SESSION_ID = "consistency-test-session"
 # the new membership relationship before we continued with the implementation.
 # """
 
-# FIXED_TRANSCRIPT = """
-# Interviewer: Tell me about a backend project you have worked on.
+FIXED_TRANSCRIPT = """
+Interviewer: Tell me about a backend project you have worked on.
 
-# Candidate: I built a Python Flask backend for a household management application.
-# I was responsible for designing the API endpoints, connecting the application
-# to a database, implementing authentication, and testing the routes. One
-# challenge was handling different roles within a household. I initially stored
-# the role directly on the user model, but that made it difficult to distinguish
-# an owner from an occupant across different households. I redesigned it using
-# household membership and tested owner-only routes to make sure occupants could
-# not access them.
+Candidate: I built a Python Flask backend for a household management application.
+I was responsible for designing the API endpoints, connecting the application
+to a database, implementing authentication, and testing the routes. One
+challenge was handling different roles within a household. I initially stored
+the role directly on the user model, but that made it difficult to distinguish
+an owner from an occupant across different households. I redesigned it using
+household membership and tested owner-only routes to make sure occupants could
+not access them.
 
-# Interviewer: Tell me about a difficult technical problem you faced and how
-# you solved it.
+Interviewer: Tell me about a difficult technical problem you faced and how
+you solved it.
 
-# Candidate: I first reproduced the problem and broke it into smaller parts.
-# I traced the request from the API endpoint through the database query and
-# identified where the incorrect authorization decision was being made. I
-# considered whether changing the route logic or changing the data model would
-# solve the problem. I chose the membership-based design because it represented
-# the relationship more accurately and also handled users belonging to multiple
-# households. I then tested both authorized and unauthorized cases, including
-# an occupant attempting to access an owner-only route.
+Candidate: I first reproduced the problem and broke it into smaller parts.
+I traced the request from the API endpoint through the database query and
+identified where the incorrect authorization decision was being made. I
+considered whether changing the route logic or changing the data model would
+solve the problem. I chose the membership-based design because it represented
+the relationship more accurately and also handled users belonging to multiple
+households. I then tested both authorized and unauthorized cases, including
+an occupant attempting to access an owner-only route.
 
-# Interviewer: How do you explain technical ideas to someone who is not deeply
-# familiar with backend development?
+Interviewer: How do you explain technical ideas to someone who is not deeply
+familiar with backend development?
 
-# Candidate: I avoid starting with implementation details. I first explain the
-# problem in simple terms, then describe the relationship between the components,
-# and only introduce technical terms when they are useful. For example, when
-# explaining the household membership redesign, I compared it to having a
-# separate membership record for each household instead of putting every role
-# directly on the person's profile. I then showed a small example before
-# discussing the actual implementation.
+Candidate: I avoid starting with implementation details. I first explain the
+problem in simple terms, then describe the relationship between the components,
+and only introduce technical terms when they are useful. For example, when
+explaining the household membership redesign, I compared it to having a
+separate membership record for each household instead of putting every role
+directly on the person's profile. I then showed a small example before
+discussing the actual implementation.
 
-# Interviewer: Why are you interested in a Junior Python Backend Developer role?
+Interviewer: Why are you interested in a Junior Python Backend Developer role?
 
-# Candidate: I enjoy building backend systems with Python because I like working
-# with APIs, databases, authentication, and the logic that makes applications
-# work reliably. I want to become stronger in backend engineering and learn how
-# professional teams design, test, and maintain production systems. This role
-# fits my goal because it would allow me to apply what I have already built while
-# developing stronger engineering practices.
+Candidate: I enjoy building backend systems with Python because I like working
+with APIs, databases, authentication, and the logic that makes applications
+work reliably. I want to become stronger in backend engineering and learn how
+professional teams design, test, and maintain production systems. This role
+fits my goal because it would allow me to apply what I have already built while
+developing stronger engineering practices.
 
-# Interviewer: Tell me about a time you worked with others, received feedback,
-# or took ownership of a mistake.
+Interviewer: Tell me about a time you worked with others, received feedback,
+or took ownership of a mistake.
 
-# Candidate: During the household project, I initially designed the roles in a
-# way that worked for a single household but did not scale well when users could
-# belong to multiple households. After discussing the problem with another
-# developer, I accepted the feedback and took ownership of redesigning that
-# part of the system. I explained the change to the team, updated the affected
-# routes, and added tests so the same problem would not return.
-# """
-
-# # FIXED_CANDIDATE_TRANSCRIPT = """
-# # I discovered that storing household roles directly
-# # on the user model made it difficult to distinguish an owner
-# # from an occupant across households. I redesigned the architecture
-# # using household membership and tested owner-only routes to ensure
-# # occupants could not access them.
-
-# # I explained why the old structure caused problems and showed
-# # the new membership relationship before we continued with the implementation.
-# # """
-
-
-
-# # RUBRIC = {
-# #     "Problem Solving": {
-# #         "weight": 60,
-# #         "strong_answer_looks_like": (
-# #             "Identifies a concrete problem, explains personal actions, "
-# #             "reasoning, and how the solution was verified."
-# #         )
-# #     },
-
-# #     "Relevant Experience": {
-# #         "weight": 40,
-# #         "strong_answer_looks_like": (
-# #             "Describes backend implementation work personally completed."
-# #         )
-# #     }
-# # }
-
-
-
+Candidate: During the household project, I initially designed the roles in a
+way that worked for a single household but did not scale well when users could
+belong to multiple households. After discussing the problem with another
+developer, I accepted the feedback and took ownership of redesigning that
+part of the system. I explained the change to the team, updated the affected
+routes, and added tests so the same problem would not return.
+"""
 
 # FIXED_CANDIDATE_TRANSCRIPT = """
-# I built a Python Flask backend for a household management application.
-# I was responsible for designing the API endpoints, connecting the application
-# to a database, implementing authentication, and testing the routes. One
-# challenge was handling different roles within a household. I initially stored
-# the role directly on the user model, but that made it difficult to distinguish
-# an owner from an occupant across different households. I redesigned it using
-# household membership and tested owner-only routes to make sure occupants could
-# not access them.
+# I discovered that storing household roles directly
+# on the user model made it difficult to distinguish an owner
+# from an occupant across households. I redesigned the architecture
+# using household membership and tested owner-only routes to ensure
+# occupants could not access them.
 
-# I first reproduced the problem and broke it into smaller parts. I traced the
-# request from the API endpoint through the database query and identified where
-# the incorrect authorization decision was being made. I considered whether
-# changing the route logic or changing the data model would solve the problem.
-# I chose the membership-based design because it represented the relationship
-# more accurately and also handled users belonging to multiple households. I
-# then tested both authorized and unauthorized cases, including an occupant
-# attempting to access an owner-only route.
-
-# I avoid starting with implementation details. I first explain the problem in
-# simple terms, then describe the relationship between the components, and only
-# introduce technical terms when they are useful. For example, when explaining
-# the household membership redesign, I compared it to having a separate
-# membership record for each household instead of putting every role directly on
-# the person's profile. I then showed a small example before discussing the
-# actual implementation.
-
-# I enjoy building backend systems with Python because I like working with APIs,
-# databases, authentication, and the logic that makes applications work reliably.
-# I want to become stronger in backend engineering and learn how professional
-# teams design, test, and maintain production systems. This role fits my goal
-# because it would allow me to apply what I have already built while developing
-# stronger engineering practices.
-
-# During the household project, I initially designed the roles in a way that
-# worked for a single household but did not scale well when users could belong
-# to multiple households. After discussing the problem with another developer,
-# I accepted the feedback and took ownership of redesigning that part of the
-# system. I explained the change to the team, updated the affected routes, and
-# added tests so the same problem would not return.
+# I explained why the old structure caused problems and showed
+# the new membership relationship before we continued with the implementation.
 # """
 
-STRONG_FIXED_TRANSCRIPT = """
-Interviewer: Tell me about a difficult backend problem you solved.
 
-Candidate: I discovered that storing household roles directly on the user
-model made it difficult to distinguish an owner from an occupant across
-different households. I traced the problem to the data model and redesigned
-the architecture using household membership so the role belonged to the
-relationship between a user and a household. I then tested owner-only
-routes with both authorized and unauthorized users to verify that occupants
-could not access them.
 
-Interviewer: How did you explain the architectural change to others?
+# RUBRIC = {
+#     "Problem Solving": {
+#         "weight": 60,
+#         "strong_answer_looks_like": (
+#             "Identifies a concrete problem, explains personal actions, "
+#             "reasoning, and how the solution was verified."
+#         )
+#     },
 
-Candidate: I first explained the limitation of the original design using a
-concrete example where one user belonged to two households with different
-roles. Then I showed the new membership relationship and explained why it
-solved the problem before we implemented the change.
+#     "Relevant Experience": {
+#         "weight": 40,
+#         "strong_answer_looks_like": (
+#             "Describes backend implementation work personally completed."
+#         )
+#     }
+# }
 
-Interviewer: Why are you interested in a Junior Python Backend Developer role?
 
-Candidate: I enjoy building backend systems with Python because I like
-working with APIs, databases, authentication, and the logic behind
-applications. I have built backend projects with Python and Flask, and I
-want to deepen my engineering skills by working on production systems and
-learning from experienced backend developers.
 
-Interviewer: Tell me about a time you received difficult feedback.
 
-Candidate: During a project, I received feedback that part of my implementation
-was difficult to maintain because the logic was too tightly coupled. Instead
-of defending the implementation, I asked for specific examples, refactored
-the affected code, and added tests to make sure the behavior remained
-correct. The feedback changed how I think about maintainability.
+FIXED_CANDIDATE_TRANSCRIPT = """
+I built a Python Flask backend for a household management application.
+I was responsible for designing the API endpoints, connecting the application
+to a database, implementing authentication, and testing the routes. One
+challenge was handling different roles within a household. I initially stored
+the role directly on the user model, but that made it difficult to distinguish
+an owner from an occupant across different households. I redesigned it using
+household membership and tested owner-only routes to make sure occupants could
+not access them.
 
-Interviewer: Tell me about a project or practical experience relevant to
-backend development.
+I first reproduced the problem and broke it into smaller parts. I traced the
+request from the API endpoint through the database query and identified where
+the incorrect authorization decision was being made. I considered whether
+changing the route logic or changing the data model would solve the problem.
+I chose the membership-based design because it represented the relationship
+more accurately and also handled users belonging to multiple households. I
+then tested both authorized and unauthorized cases, including an occupant
+attempting to access an owner-only route.
 
-Candidate: I have built Python backend projects involving Flask, databases,
-API routes, authentication, and testing. My responsibilities included
-designing routes, implementing backend logic, working with the database,
-debugging issues, and writing tests. One of the projects required me to
-redesign the data model when the original approach could not correctly
-represent users belonging to multiple households.
-"""
+I avoid starting with implementation details. I first explain the problem in
+simple terms, then describe the relationship between the components, and only
+introduce technical terms when they are useful. For example, when explaining
+the household membership redesign, I compared it to having a separate
+membership record for each household instead of putting every role directly on
+the person's profile. I then showed a small example before discussing the
+actual implementation.
 
-STRONG_CANDIDATE_TRANSCRIPT = """
-Interviewer: Tell me about a difficult backend problem you solved.
+I enjoy building backend systems with Python because I like working with APIs,
+databases, authentication, and the logic that makes applications work reliably.
+I want to become stronger in backend engineering and learn how professional
+teams design, test, and maintain production systems. This role fits my goal
+because it would allow me to apply what I have already built while developing
+stronger engineering practices.
 
-Candidate: I discovered that storing household roles directly on the user
-model made it difficult to distinguish an owner from an occupant across
-different households. I traced the problem to the data model and redesigned
-the architecture using household membership so the role belonged to the
-relationship between a user and a household. I then tested owner-only
-routes with both authorized and unauthorized users to verify that occupants
-could not access them.
-
-Interviewer: How did you explain the architectural change to others?
-
-Candidate: I first explained the limitation of the original design using a
-concrete example where one user belonged to two households with different
-roles. Then I showed the new membership relationship and explained why it
-solved the problem before we implemented the change.
-
-Interviewer: Why are you interested in a Junior Python Backend Developer role?
-
-Candidate: I enjoy building backend systems with Python because I like
-working with APIs, databases, authentication, and the logic behind
-applications. I have built backend projects with Python and Flask, and I
-want to deepen my engineering skills by working on production systems and
-learning from experienced backend developers.
-
-Interviewer: Tell me about a time you received difficult feedback.
-
-Candidate: During a project, I received feedback that part of my implementation
-was difficult to maintain because the logic was too tightly coupled. Instead
-of defending the implementation, I asked for specific examples, refactored
-the affected code, and added tests to make sure the behavior remained
-correct. The feedback changed how I think about maintainability.
-
-Interviewer: Tell me about a project or practical experience relevant to
-backend development.
-
-Candidate: I have built Python backend projects involving Flask, databases,
-API routes, authentication, and testing. My responsibilities included
-designing routes, implementing backend logic, working with the database,
-debugging issues, and writing tests. One of the projects required me to
-redesign the data model when the original approach could not correctly
-represent users belonging to multiple households.
+During the household project, I initially designed the roles in a way that
+worked for a single household but did not scale well when users could belong
+to multiple households. After discussing the problem with another developer,
+I accepted the feedback and took ownership of redesigning that part of the
+system. I explained the change to the team, updated the affected routes, and
+added tests so the same problem would not return.
 """
 
 
-
-
-MODERATE_CANDIDATE_TRANSCRIPT = """
-I worked on a Flask backend where I had problems with user roles.
-The original design stored roles directly on the user, so I changed
-it to use household membership. I also tested some of the routes and
-eventually the authorization worked correctly.
-
-I explained that the old design was causing problems and showed the
-team the new structure. We discussed it before making the changes.
-
-I like Python and backend development because I enjoy working with APIs
-and databases. I have done some Python projects and I think the role
-would help me improve my backend skills.
-
-I once received feedback that some of my code could be cleaner.
-I listened to the feedback and made some changes to the code. It helped
-me think more about writing maintainable code.
-
-I have worked on Python and Flask projects where I created routes,
-worked with databases, and fixed backend problems. I was responsible
-for some of the backend implementation and testing.
-"""
-
-MODERATE_FIXED_TRANSCRIPT = """
-Interviewer: Tell me about a difficult backend problem you solved.
-
-Candidate: I worked on a Flask backend where I had problems with user roles.
-The original design stored roles directly on the user, so I changed it to
-use household membership. I also tested some of the routes and eventually
-the authorization worked correctly.
-
-Interviewer: How did you explain the architectural change to others?
-
-Candidate: I explained that the old design was causing problems and showed
-the team the new structure. We discussed it before making the changes.
-
-Interviewer: Why are you interested in a Junior Python Backend Developer role?
-
-Candidate: I like Python and backend development because I enjoy working
-with APIs and databases. I have done some Python projects and I think the
-role would help me improve my backend skills.
-
-Interviewer: Tell me about a time you received difficult feedback.
-
-Candidate: I once received feedback that some of my code could be cleaner.
-I listened to the feedback and made some changes to the code. It helped me
-think more about writing maintainable code.
-
-Interviewer: Tell me about a project or practical experience relevant to
-backend development.
-
-Candidate: I have worked on Python and Flask projects where I created routes,
-worked with databases, and fixed backend problems. I was responsible for
-some of the backend implementation and testing.
-"""
-
-
-WEAK_FIXED_TRANSCRIPT = """
-Interviewer: Tell me about a difficult backend problem you solved.
-
-Candidate: I have encountered backend problems before, especially when
-working with Python. Usually I check the code and search online until I
-find something that works.
-
-Interviewer: How did you explain the architectural change to others?
-
-Candidate: I just explained the changes to them and showed them the code.
-They understood it and we continued.
-
-Interviewer: Why are you interested in a Junior Python Backend Developer role?
-
-Candidate: I want the job because I like computers and Python. I think
-backend development is interesting and it would be good experience for me.
-
-Interviewer: Tell me about a time you received difficult feedback.
-
-Candidate: People have given me feedback before. I normally listen to it
-and try to improve. I think feedback is important.
-
-Interviewer: Tell me about a project or practical experience relevant to
-backend development.
-
-Candidate: I have done some Python projects and worked with Flask before.
-I have written some code and worked on backend things, but I do not
-remember the specific details of one project.
-"""
-
-WEAK_CANDIDATE_TRANSCRIPT = """
-I have encountered backend problems before, especially when working
-with Python. Usually I check the code and search online until I find
-something that works.
-
-I just explained the changes to them and showed them the code.
-They understood it and we continued.
-
-I want the job because I like computers and Python. I think backend
-development is interesting and it would be good experience for me.
-
-People have given me feedback before. I normally listen to it and try
-to improve. I think feedback is important.
-
-I have done some Python projects and worked with Flask before. I have
-written some code and worked on backend things, but I do not remember
-the specific details of one project.
-"""
-
-FIXED_TRANSCRIPT = WEAK_FIXED_TRANSCRIPT
-
-FIXED_CANDIDATE_TRANSCRIPT = WEAK_CANDIDATE_TRANSCRIPT
 #RUBRIC B
 
 
