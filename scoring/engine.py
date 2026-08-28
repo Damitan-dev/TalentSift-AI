@@ -5,7 +5,7 @@ from pydantic import ValidationError
 
 from scoring.models import Scorecard,CompetencyScore
 
-
+import os
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -167,8 +167,10 @@ def verify_evidence_quotes(
             # Go through every evidence quote
             # attached to this competency.
 
-
-            if quote not in transcript:
+            quote = quote.strip().strip('"')
+            quote = " ".join(quote.split())
+            transcript_for_check = " ".join(transcript.split()) 
+            if quote not in transcript_for_check:
                 # The evaluator claimed this was a verbatim quote,
                 # but Python cannot find it in the transcript.
 
