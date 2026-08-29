@@ -1,6 +1,7 @@
 import pytest
 
 from scoring.models import CompetencyScore, Scorecard
+from scoring.engine import score_transcript, verify_evidence_quotes
 
 
 def test_score_bounds():
@@ -216,3 +217,72 @@ def test_no_explored_competencies_has_no_overall():
     }
 
     assert scorecard.compute_overall(weights) is None
+
+
+
+def test_empty_transcript_returns_not_explored():
+    """
+    An empty interview contains no evidence about the candidate.
+
+    Therefore:
+    - every competency must be not_explored
+    - every competency score must be None
+    - no evidence should exist
+    - overall must be None
+    """
+
+    rubric = {
+        "Problem Solving": {
+            "weight": 50,
+            "strong_answer_looks_like": (
+                "Explains a concrete problem and solution."
+            ),
+        },
+        "Communication": {
+            "weight": 50,
+            "strong_answer_looks_like": (
+                "Explains ideas clearly."
+            ),
+        },
+    }
+
+    scorecard = score_transcript(
+        session_id="empty-session",
+        scoring_transcript="",
+        rubric=rubric,
+        evidence_transcript="",
+    )
+
+    assert len(scorecard.scores) == 2
+
+    for competency in scorecard.scores:
+        assert competency.status == "not_explored"
+        assert competency.score is None
+        assert competency.evidence == []
+        assert competency.justification == "not explored"
+
+    assert scorecard.overall is None
+
+
+
+
+
+def test_empty_evidence_quote_is_rejected():
+    scorecard = Scorecard(
+        session_id="empty-evidence-session",
+        scores=[
+            CompetencyScore(
+                name="Problem Solving",
+                status="scored",
+                score=3,
+                evidence=[""],
+                justification="Some justification.",
+            )
+        ],
+    )
+
+    with pytest.raises(ValueError):
+        verify_evidence_quotes(
+            scorecard=scorecard,
+            transcript="I reproduced the problem and tested the fix.",
+        )
