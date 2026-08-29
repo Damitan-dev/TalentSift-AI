@@ -17,13 +17,15 @@ from dotenv import load_dotenv
 import time #To measure the latency
 import statistics # To help us calculate the median formus
 from pathlib import Path  # Helps us build a reliable path to the prompt file.
+from scoring.engine import EvaluationFailedError
+from scoring.session_scoring import score_saved_session
 
 #Part 1: Connect and Configure
 load_dotenv()
 
 API_KEY = os.environ["OPENAI_API_KEY"]
 
-URL = "wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1" #Tells the websocket where to connect to
+URL = "wss://api.openai.com/v1/realtime?model=gpt-realtime" #Tells the websocket where to connect to
 HEADERS = {"Authorization" : f"Bearer {API_KEY}"} #For authorization via the API key if valid
 print(URL)
 
@@ -59,6 +61,40 @@ INSTRUCTIONS = prompt_template.replace(
     LANGUAGE
 )
 
+# Turn this on only when running slow/fast or accent fairness tests.
+TEST_MODE = os.getenv("TALENTSIFT_TEST_MODE") == "1"
+
+# This is the one fixed question used in every controlled speech test.
+CONTROLLED_TEST_QUESTION = (
+    "Tell me about a backend problem you solved and how you handled it."
+)
+
+if TEST_MODE:
+    INSTRUCTIONS = f"""
+You are Alex, running a controlled speech-fairness test.
+
+This is not a normal dynamic TalentSift interview.
+
+Rules:
+1. Your first spoken question must be exactly:
+   "{CONTROLLED_TEST_QUESTION}"
+
+2. Wait for one candidate answer.
+
+3. Do not ask follow-up questions.
+   Do not score or comment on the answer.
+
+4. After the candidate finishes that one answer, call the
+   finish_interview tool immediately.
+
+5. The application will handle the final closing.
+
+Speak only in English.
+""".strip()
+
+    print("\n🧪 CONTROLLED SPEECH TEST MODE")
+    print(f"Fixed question: {CONTROLLED_TEST_QUESTION}\n")
+
 async def main():
     async with websockets.connect(
         URL,#OpenAI Realtime Websocket URL
@@ -72,6 +108,17 @@ async def main():
         #   b) turn detection = server-side VAD (the engine detects when you stop)
         #   c) a voice you like from the available list
         #   d) instructions = INSTRUCTIONS
+
+
+        finish_tool_description = (
+                "In controlled speech-test mode, call this immediately after the "
+                "candidate gives one answer to the fixed question."
+                if TEST_MODE
+                else (
+                    "Call this only after all required interview competencies "
+                    "have been explored and the final closing has been given."
+                )
+            )
         session_config = {
             "type": "session.update",          # the session-update event type
             "session": {
@@ -119,10 +166,7 @@ async def main():
 
         "name": "finish_interview",  # This is the name Alex will call when the whole interview is finished.
 
-        "description": (
-            "Call this only after all required interview competencies "
-            "have been explored and the final closing has been given."
-        ),  # Helps Alex understand exactly when this function should be used.
+        "description": finish_tool_description,  # Helps Alex understand exactly when this function should be used.
 
         "parameters": {
             "type": "object",  # The function accepts an object of arguments.
@@ -344,6 +388,7 @@ async def receive(ws): #For receiving everything the AI sends back
         async for raw in ws: #waiting for messages from the websocket
             event = json.loads(raw) #convert the json text into python dictionary
             etype = event.get("type", "") # saving the event type into a variable called etype
+           
 
             if etype == "session.updated" and not interview_started:
                 print("✅ Session ready. Alex is starting...")
@@ -506,9 +551,19 @@ async def receive(ws): #For receiving everything the AI sends back
 
 
                     if completed_now:
-                        print(
-                            f"\n✅ Interview completed and saved: {session.id}"
-                        )
+                        # The final closing transcript is now saved, so score the complete session.
+                        try:
+                            scorecard, scorecard_path = score_saved_session(
+                                session_id=session.id,
+                                session_repo=repo,
+                            )
+                            print(f"\n✅ Interview completed and saved: {session.id}")
+                            print(f"✅ Scorecard saved: {scorecard_path}")
+                            print(f"✅ Overall score: {scorecard.overall}/5")
+
+                        except (EvaluationFailedError, ValueError) as error:
+                            print(f"\n✅ Interview completed and saved: {session.id}")
+                            print(f"⚠ Scoring failed: {error}")
 
 
             elif etype == "response.function_call_arguments.done":
