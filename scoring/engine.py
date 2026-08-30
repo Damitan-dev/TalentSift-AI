@@ -306,10 +306,39 @@ the candidate with more polished English must not receive a higher
 Relevant Experience score simply because the wording is more professional.
 
 
-6. EVALUATE THE RUBRIC, NOT THE WRITING QUALITY
+6. EVALUATE USING THE SUPPLIED RUBRIC
 
-Use the rubric's "strong_answer_looks_like" description to determine what
-evidence is relevant.
+Use only the criteria supplied for each competency.
+
+A competency may use either:
+
+- "strong_answer_looks_like"
+
+or the more structured:
+
+- "indicators"
+- "score_anchors"
+
+When a competency contains "indicators" and "score_anchors":
+
+1. Identify which indicators are supported by candidate evidence.
+
+2. Compare the demonstrated evidence against the score anchors
+   from level 1 through level 5.
+
+3. Assign the highest score whose anchor is fully supported by
+   the candidate's evidence.
+
+4. Do not award a higher score unless the evidence supports the
+   requirements of that higher anchor.
+
+5. A score of 5 must be supported by the level-5 anchor.
+   Do not assign 5 merely because an answer sounds strong,
+   polished, detailed, or impressive.
+
+When a competency contains only "strong_answer_looks_like",
+use that description to determine what evidence is relevant
+and apply the general 1-to-5 scoring instructions.
 
 Do not add hidden criteria such as:
 
@@ -322,7 +351,6 @@ Do not add hidden criteria such as:
 - grammatical correctness
 
 unless the rubric explicitly makes one of these a job-relevant requirement.
-
 
 7. DO NOT OVERREWARD DETAIL
 

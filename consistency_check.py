@@ -155,13 +155,42 @@ RUBRIC = {
     },
 
     "Problem Solving": {
-        "weight": 25,
-        "strong_answer_looks_like": (
-            "Breaks problems into logical steps, explains reasoning before "
-            "coding, considers edge cases, and chooses appropriate solutions."
-        )
-    },
+    "weight": 25,
 
+    "indicators": [
+        "Identifies a concrete problem",
+        "Explains investigation or diagnosis",
+        "Explains reasoning behind the chosen approach",
+        "Considers alternatives or trade-offs",
+        "Describes the implemented solution",
+        "Explains how the result was verified",
+    ],
+
+    "score_anchors": {
+        1: (
+            "Provides no meaningful problem-solving evidence, "
+            "or gives only unsupported or very general claims."
+        ),
+        2: (
+            "Identifies a problem and some action, but provides "
+            "little reasoning and little or no verification."
+        ),
+        3: (
+            "Explains a concrete problem, some reasoning, "
+            "a solution, and basic verification."
+        ),
+        4: (
+            "Explains a concrete problem, systematic reasoning, "
+            "alternatives or trade-offs, a justified solution, "
+            "and meaningful verification."
+        ),
+        5: (
+            "Demonstrates all characteristics of level 4 plus "
+            "particularly strong technical depth, edge-case thinking, "
+            "trade-off analysis, or clear evidence of impact."
+        ),
+    },
+},
     "Communication": {
         "weight": 20,
         "strong_answer_looks_like": (
@@ -311,7 +340,20 @@ for competency_name in RUBRIC.keys():
             if score.name == competency_name
         )
 
+        if competency.status != "scored":
+            raise RuntimeError(
+                f"{competency_name} was unexpectedly "
+                f"{competency.status} during consistency testing."
+            )
+
+        if competency.score is None:
+            raise RuntimeError(
+                f"{competency_name} was marked as scored "
+                f"but returned score=None."
+            )
+
         scores.append(competency.score)
+        
 
 
     minimum = min(scores)
