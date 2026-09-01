@@ -132,11 +132,11 @@ def test_weighted_overall():
 
 
 def test_not_explored_is_excluded_from_overall():
-    # This is the fairness behavior we just introduced.
+    # A competency that was not assessed must not be treated
+    # as though the candidate demonstrated poor performance.
     #
-    # Relevant Experience was never assessed, so its
-    # weight must not reduce the candidate's score.
-
+    # Only scored competencies contribute to the current
+    # weighted overall result.
     scorecard = Scorecard(
         session_id="partial-session",
         scores=[
@@ -222,10 +222,10 @@ def test_no_explored_competencies_has_no_overall():
 
 def test_empty_transcript_returns_not_explored():
     """
-    An empty interview contains no evidence about the candidate.
+    An empty interview contains no candidate evidence.
 
     Therefore:
-    - every competency must be not_explored
+    - every requested competency must be not_explored
     - every competency score must be None
     - no evidence should exist
     - overall must be None
@@ -234,15 +234,35 @@ def test_empty_transcript_returns_not_explored():
     rubric = {
         "Problem Solving": {
             "weight": 50,
-            "strong_answer_looks_like": (
-                "Explains a concrete problem and solution."
-            ),
+            "indicators": [
+                "Identifies a concrete problem",
+                "Explains investigation or diagnosis",
+                "Explains reasoning behind the chosen approach",
+                "Describes the implemented solution",
+                "Explains how the result was verified",
+            ],
+            "score_anchors": {
+                1: "Provides no meaningful problem-solving evidence.",
+                2: "Provides limited problem-solving evidence.",
+                3: "Provides adequate problem-solving evidence.",
+                4: "Provides strong systematic problem-solving evidence.",
+                5: "Provides exceptional problem-solving evidence.",
+            },
         },
         "Communication": {
             "weight": 50,
-            "strong_answer_looks_like": (
-                "Explains ideas clearly."
-            ),
+            "indicators": [
+                "Explains technical ideas understandably",
+                "Organizes explanations logically",
+                "Connects technical details to their purpose",
+            ],
+            "score_anchors": {
+                1: "Provides no meaningful communication evidence.",
+                2: "Provides limited communication evidence.",
+                3: "Provides adequate communication evidence.",
+                4: "Provides strong communication evidence.",
+                5: "Provides exceptional communication evidence.",
+            },
         },
     }
 
@@ -262,11 +282,6 @@ def test_empty_transcript_returns_not_explored():
         assert competency.justification == "not explored"
 
     assert scorecard.overall is None
-
-
-
-
-
 def test_empty_evidence_quote_is_rejected():
     scorecard = Scorecard(
         session_id="empty-evidence-session",
@@ -286,3 +301,75 @@ def test_empty_evidence_quote_is_rejected():
             scorecard=scorecard,
             transcript="I reproduced the problem and tested the fix.",
         )
+
+
+def test_compute_overall_uses_competency_weights():
+    scorecard = Scorecard(
+        session_id="weighted-overall-test",
+        scores=[
+            CompetencyScore(
+                name="Problem Solving",
+                status="scored",
+                score=3,
+                evidence=["Problem-solving evidence"],
+                justification="Test justification.",
+            ),
+            CompetencyScore(
+                name="Culture & Values Fit",
+                status="scored",
+                score=4,
+                evidence=["Culture evidence"],
+                justification="Test justification.",
+            ),
+        ],
+    )
+
+    weights = {
+        "Problem Solving": 25,
+        "Culture & Values Fit": 10,
+    }
+
+    assert scorecard.compute_overall(weights) == 3.29
+
+
+
+def test_python_overwrites_untrusted_overall():
+    scorecard = Scorecard(
+        session_id="overall-overwrite-test",
+        scores=[
+            CompetencyScore(
+                name="Problem Solving",
+                status="scored",
+                score=3,
+                evidence=["Problem-solving evidence"],
+                justification="Test justification.",
+            ),
+            CompetencyScore(
+                name="Culture & Values Fit",
+                status="scored",
+                score=4,
+                evidence=["Culture evidence"],
+                justification="Test justification.",
+            ),
+        ],
+
+        # Pretend this incorrect value came from the LLM.
+        overall=3.5,
+    )
+
+    weights = {
+        "Problem Solving": 25,
+        "Culture & Values Fit": 10,
+    }
+
+    # Before deterministic post-processing, the untrusted value exists.
+    assert scorecard.overall == 3.5
+
+    # This is the same assignment performed in scoring/engine.py.
+    scorecard.overall = scorecard.compute_overall(weights)
+
+    # Python replaces 3.5 with the correct weighted result.
+    assert scorecard.overall == 3.29
+
+
+    

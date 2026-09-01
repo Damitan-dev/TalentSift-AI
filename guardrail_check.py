@@ -22,9 +22,73 @@ REPEAT_RUN_TOLERANCE = 1        # Allows normal LLM variation of at most one poi
 
 RUBRIC = {
     "Relevant Experience": {
-        "weight": 30,
-        "strong_answer_looks_like": "Describes relevant backend work, responsibilities, technical choices, and outcomes.",
+    "weight": 30,
+
+    "indicators": [
+        "Describes a concrete backend project, work task, or practical technical context",
+        "Clearly identifies the candidate's own responsibilities or contributions",
+        "Describes hands-on work with backend technologies, components, or engineering practices relevant to the role",
+        "Demonstrates meaningful scope or depth of responsibility in the work described",
+        "Describes a concrete result, delivered functionality, or practical outcome of the work",
+    ],
+
+    "score_anchors": {
+        1: (
+            "Provides no meaningful evidence of relevant backend experience "
+            "when the competency is explored, or gives only unsupported claims "
+            "without describing actual relevant work."
+        ),
+
+        2: (
+            "Mentions some relevant backend project or practical experience, "
+            "but gives limited detail about the candidate's own contribution, "
+            "responsibilities, technical work, or resulting outcome."
+        ),
+
+        3: (
+            "Describes a concrete relevant backend project or work context, "
+            "clearly identifies some of the candidate's own responsibilities "
+            "or contributions, and provides specific evidence of hands-on "
+            "technical work. The scope, depth, ownership, or outcome may still "
+            "be limited or only partially developed."
+        ),
+
+        4: (
+            "Provides clear and substantial evidence of relevant hands-on "
+            "backend experience. The candidate explains their own responsibilities "
+            "and contributions in specific terms, demonstrates meaningful depth "
+            "or scope in relevant backend work, and describes concrete functionality, "
+            "results, or outcomes from that work. A single sufficiently substantial "
+            "project or work example can support this level; multiple projects or "
+            "many years of experience are not required."
+        ),
+
+        5: (
+            "Demonstrates all characteristics of level 4 and additionally provides "
+            "explicit evidence of exceptional depth, scope, or responsibility in "
+            "relevant backend work, such as substantial end-to-end ownership, "
+            "responsibility for important production behavior or constraints, "
+            "significant technical scope across a system, or clearly demonstrated "
+            "impact beyond ordinary project contribution. These characteristics "
+            "must be supported by specific candidate evidence and must not be "
+            "inferred from job title, employer, years of experience, or technology names."
+        ),
     },
+
+    "non_factors": [
+        "Employer or company prestige",
+        "Job title prestige",
+        "School or institution prestige",
+        "Years of experience by itself",
+        "Number of technologies named",
+        "Technical jargon by itself",
+        "Unrelated work experience",
+        "Answer length or storytelling polish",
+        "Accent",
+        "Grammar accuracy",
+        "Native-like English",
+    ],
+},
     "Problem Solving": {
     "weight": 25,
 
@@ -56,24 +120,193 @@ RUBRIC = {
             "and meaningful verification."
         ),
         5: (
-            "Demonstrates all characteristics of level 4 plus "
-            "particularly strong technical depth, edge-case thinking, "
-            "trade-off analysis, or clear evidence of impact."
+            "Demonstrates all characteristics of level 4 and additionally "
+    "provides explicit evidence of exceptional depth: the candidate "
+    "analyzes significant technical constraints or multiple important "
+    "edge or failure cases beyond basic verification, and describes "
+    "a concrete outcome or impact of the implemented solution. "
+    "Do not infer these additional characteristics when they are "
+    "not explicitly supported by the candidate's evidence."
         ),
     },
 },
     "Communication": {
-        "weight": 20,
-        "strong_answer_looks_like": "Explains technical ideas clearly, logically, and understandably.",
+    "weight": 20,
+
+    "indicators": [
+        "Explains technical ideas in an understandable way",
+        "Organizes explanations in a logical sequence",
+        "Connects technical details to the underlying problem or purpose",
+        "Uses examples, comparisons, or context when they improve understanding",
+        "Adapts the level of technical detail to make the explanation easier to follow",
+    ],
+
+    "score_anchors": {
+        1: (
+            "Provides no meaningful evidence of communicating a technical idea, "
+            "or the explanation is too unclear or disconnected to understand "
+            "the substantive technical meaning."
+        ),
+
+        2: (
+            "Communicates some relevant technical information, but the explanation "
+            "is limited, poorly structured, or relies mostly on stating or repeating "
+            "technical details without making the reasoning or meaning clear."
+        ),
+
+        3: (
+            "Communicates the main technical meaning understandably and provides "
+            "some logical structure or explanation, but the explanation has limited "
+            "context, development, or adaptation for the listener."
+        ),
+
+        4: (
+            "Clearly communicates technical meaning in a logical sequence, "
+            "connects details to the underlying problem or purpose, and uses "
+            "appropriate context, examples, or explanation to support understanding."
+        ),
+
+        5: (
+            "Demonstrates all characteristics of level 4 and additionally shows "
+            "explicit evidence of exceptional communication skill, such as adapting "
+            "the explanation to different levels of technical knowledge, checking "
+            "understanding and changing the explanation when needed, or successfully "
+            "clarifying a genuinely complex technical concept through multiple "
+            "complementary explanation strategies."
+        ),
     },
+
+    "non_factors": [
+        "Accent",
+        "Grammar accuracy",
+        "Native-like English",
+        "Vocabulary sophistication",
+        "Fillers or hesitations",
+        "Speaking speed",
+        "Sentence elegance",
+    ],
+},
     "Role Motivation": {
-        "weight": 15,
-        "strong_answer_looks_like": "Connects interest in backend engineering with personal goals and this role.",
+    "weight": 15,
+
+    "indicators": [
+        "Expresses interest in backend or Python engineering",
+        "Identifies specific backend or Python areas of interest",
+        "Connects the role to existing relevant experience",
+        "Connects the role to a concrete learning or career goal",
+        "Shows understanding of what the role involves",
+    ],
+
+    "score_anchors": {
+        1: (
+            "Provides no meaningful role-motivation evidence, "
+            "or gives only an unrelated or unsupported statement."
+        ),
+
+        2: (
+            "Expresses general interest in backend or Python engineering, "
+            "but provides little meaningful connection to the role, "
+            "existing experience, or learning and career goals."
+        ),
+
+        3: (
+            "Expresses relevant interest in backend or Python engineering "
+            "and connects the role to either existing relevant experience "
+            "or a concrete learning or career goal, but the connection "
+            "remains partial or general."
+        ),
+
+        4: (
+           "Clearly identifies specific backend or Python interests and "
+    "connects the role to both existing relevant experience and "
+    "a concrete learning or career goal. For Role Motivation, the "
+    "experience connection is satisfied when the candidate explicitly "
+    "states that existing relevant project or work experience would be "
+    "used, applied, built upon, or extended in the role. Detailed proof "
+    "of responsibilities, technical choices, or outcomes from that "
+    "experience belongs to Relevant Experience and is not required for "
+    "Role Motivation. Do not reduce this score merely because the "
+    "candidate expresses that connection briefly or with non-native "
+    "grammar when the substantive meaning is clear. Company-specific "
+    "knowledge or a detailed long-term career plan is not required for "
+    "this level."
+        ),
+
+        5: (
+            "Demonstrates all characteristics of level 4 plus a particularly "
+            "specific understanding of the role and a well-supported connection "
+            "to a deliberate longer-term development path."
+        ),
     },
+},
     "Culture & Values Fit": {
-        "weight": 10,
-        "strong_answer_looks_like": "Gives evidence of feedback, ownership, collaboration, or learning.",
+    "weight": 10,
+
+    "indicators": [
+        "Responds constructively to relevant feedback",
+        "Takes ownership of their work, decisions, or mistakes",
+        "Collaborates with others to solve problems or improve work",
+        "Learns from feedback, mistakes, or new information",
+        "Follows through on responsibilities or corrective actions",
+    ],
+
+    "score_anchors": {
+        1: (
+            "Provides no meaningful evidence of the relevant workplace "
+            "behaviors when the competency is explored, or gives only "
+            "unsupported claims without a concrete behavioral example."
+        ),
+
+        2: (
+            "Provides some relevant evidence of collaboration, feedback, "
+            "ownership, learning, or responsibility, but the example is "
+            "limited, vague, mostly reactive, or shows little personal "
+            "action or follow-through."
+        ),
+
+        3: (
+            "Provides a concrete example demonstrating at least one "
+            "meaningful behavior such as responding to feedback, taking "
+            "ownership, collaborating, learning, or following through, "
+            "with a clear description of the candidate's own actions."
+        ),
+
+        4: (
+            "Provides a concrete example demonstrating multiple relevant "
+            "behaviors, such as constructive response to feedback together "
+            "with ownership, collaboration, learning, or follow-through. "
+            "The candidate clearly explains their own actions and how they "
+            "adapted or acted responsibly in response to the situation."
+        ),
+
+        5: (
+           "Demonstrates all characteristics of level 4 and additionally "
+    "provides explicit evidence of exceptional depth through broader "
+    "impact beyond the candidate's own immediate task or implementation. "
+    "This may include improving a shared team process, constructively "
+    "resolving a difficult team disagreement, helping others adopt a "
+    "better practice, or preventing recurrence across a broader team or "
+    "system with a concrete outcome. Normal strong follow-through on the "
+    "candidate's own work, such as correcting their implementation, "
+    "updating affected code, or adding tests for that change, is consistent "
+    "with level 4 and is not by itself sufficient for level 5. "
+    "Do not infer broader impact when it is not explicitly supported by "
+    "candidate evidence."
+        ),
     },
+
+    "non_factors": [
+        "Personality similarity",
+        "Extroversion or introversion",
+        "Charisma",
+        "Likeability",
+        "Accent",
+        "Grammar accuracy",
+        "Native-like English",
+        "Confidence of speaking style",
+        "Social background or hobbies",
+    ],
+},
 }
 
 
@@ -95,45 +328,65 @@ class TestSession:
 
 def make_test_session(transcript: str) -> TestSession:
     """
-    Convert a transcript into the same session.transcript structure
-    used by production.
+    Convert a text transcript into TestTurn objects.
 
-    Each physical line beginning with "Interviewer:" or "Candidate:"
-    becomes its own TestTurn.
+    Lines that continue after a Candidate: or Interviewer:
+    line belong to that same speaker until another speaker
+    label appears.
     """
 
     turns = []
 
-    for line in transcript.splitlines():
-        line = line.strip()
+    current_speaker = None
+    current_parts = []
+
+    def flush_turn():
+        nonlocal current_speaker, current_parts
+
+        text = " ".join(current_parts).strip()
+
+        if current_speaker and text:
+            turns.append(
+                TestTurn(
+                    speaker=current_speaker,
+                    text=text,
+                )
+            )
+
+        current_speaker = None
+        current_parts = []
+
+    for raw_line in transcript.splitlines():
+        line = raw_line.strip()
 
         if not line:
             continue
 
         if line.lower().startswith("candidate:"):
-            text = line[len("Candidate:"):].strip()
+            flush_turn()
 
-            if text:
-                turns.append(
-                    TestTurn(
-                        speaker="candidate",
-                        text=text,
-                    )
-                )
+            current_speaker = "candidate"
+            current_parts = [
+                line[len("Candidate:"):].strip()
+            ]
 
         elif line.lower().startswith("interviewer:"):
-            text = line[len("Interviewer:"):].strip()
+            flush_turn()
 
-            if text:
-                turns.append(
-                    TestTurn(
-                        speaker="interviewer",
-                        text=text,
-                    )
-                )
+            current_speaker = "interviewer"
+            current_parts = [
+                line[len("Interviewer:"):].strip()
+            ]
+
+        elif current_speaker is not None:
+            # This line has no new speaker label,
+            # so it continues the previous speaker's text.
+            current_parts.append(line)
+
+    # Save the final turn after the loop ends.
+    flush_turn()
 
     return TestSession(transcript=turns)
-
 
 BASELINE = """
 Interviewer: Tell me about a backend project.
@@ -258,7 +511,149 @@ and reliable systems. This role help me learn production engineering practices
 while using my project experience.
 """
 
+CULTURE_STRONG = """
+Interviewer: Tell me about a time you received feedback on your work.
 
+Candidate: A teammate told me that I was submitting my work too late
+for them to review it properly. I listened to the concern and asked
+what timing would make collaboration easier. I realized my approach
+was making their work harder, so I started sharing my changes earlier,
+checking in before deadlines, and following that approach on later tasks.
+"""
+
+CULTURE_WEAKER = """
+Interviewer: Tell me about a time you received feedback on your work.
+
+Candidate: A developer told me my code needed to be changed.
+I changed it because they asked me to.
+"""
+
+RELEVANT_EXPERIENCE_STRONG = """
+Interviewer: Tell me about your backend experience.
+
+Candidate: I built the backend for a booking application using Flask
+and PostgreSQL. I designed the database models, implemented the REST
+endpoints, added authentication and authorization, wrote tests for the
+main routes, and connected the API to the frontend. I was responsible
+for the backend part of the project from the initial models through the
+working application.
+"""
+
+
+RELEVANT_EXPERIENCE_WEAKER = """
+Interviewer: Tell me about your backend experience.
+
+Candidate: I worked on a Flask project at university. I helped with
+the API and database.
+"""
+
+PROBLEM_SOLVING_LEVEL_5 = """
+Interviewer: Tell me about a difficult technical problem you solved.
+
+Candidate: We had intermittent authorization failures in a backend service.
+I reproduced the failures and traced requests through the API, cache, and
+database. I found that stale membership data in the cache could allow an
+authorization decision to use outdated permissions.
+
+I considered disabling the cache, shortening the cache lifetime, and
+invalidating membership entries when permissions changed. Disabling the
+cache would have increased database load significantly, while only shortening
+the lifetime would still leave a window where stale permissions could be used.
+I chose explicit invalidation on permission changes while keeping a shorter
+fallback lifetime.
+
+I tested normal authorized and unauthorized requests, permission changes
+during active sessions, stale cache entries, concurrent membership updates,
+and cache failures. We then monitored authorization errors and database load
+after the change. The intermittent authorization failures stopped while
+database traffic remained within the expected range.
+"""
+RELEVANT_EXPERIENCE_LEVEL_5 = """
+Interviewer: Tell me about your backend experience.
+
+Candidate: I owned the backend service for an internal account-management
+platform used by several teams. I designed the API and PostgreSQL schema,
+implemented authentication and authorization, managed database migrations,
+added automated tests, and was responsible for deployment and monitoring.
+
+The service handled permission checks for multiple internal applications,
+so I also worked on backwards-compatible API changes, failure handling,
+logging, and production alerts. When usage increased, I redesigned several
+database queries and added indexes to keep response times within our target.
+
+I supported production incidents involving the service and coordinated
+changes with the teams that depended on it. After the redesign, the service
+continued supporting the additional traffic without exceeding our response-time
+target, and the shared authentication component was used by three internal teams.
+"""
+
+
+COMMUNICATION_LEVEL_5 = """
+Interviewer: Tell me about a time you had to explain a difficult technical
+idea to someone.
+
+Candidate: I had to explain an authorization redesign to both another
+developer and a non-technical project stakeholder.
+
+I first explained the underlying problem: a user's role could change
+depending on which household they were using, so storing one role directly
+on the user did not represent the relationship correctly.
+
+With the developer, I explained the database relationship, showed the
+membership table, and walked through how authorization checks would use it.
+
+When I explained the same change to the non-technical stakeholder, I avoided
+the database terminology and compared it to a person having a different
+membership card for each organization they belong to.
+
+I asked them to explain back how they understood the new model. They were
+still confused about why one person could have different permissions, so I
+changed the example and used two households where the same person was an
+owner in one and an occupant in the other. After that example, they correctly
+explained why the permissions needed to belong to the membership rather than
+directly to the user.
+"""
+
+ROLE_MOTIVATION_LEVEL_5 = """
+Interviewer: Why are you interested in this role?
+
+Candidate: I am particularly interested in this backend role because it
+involves building and maintaining Python services, APIs, databases, testing,
+and production reliability. Those are the areas I have already started
+developing through my own backend projects.
+
+I want to use that experience in a professional environment where I can learn
+how production services are reviewed, deployed, monitored, and maintained by
+a team. In the next few years, I want to grow from building working backend
+applications independently into an engineer who can take responsibility for
+reliable production services.
+
+This role fits that development path because it would let me contribute the
+Python, API, database, authentication, and testing experience I already have
+while deliberately developing the production engineering practices that I
+need for that next stage.
+"""
+CULTURE_VALUES_LEVEL_5 = """
+Interviewer: Tell me about a time feedback or a team problem led you to
+improve how the team worked.
+
+Candidate: During a project, two developers told me that my changes were
+often arriving too late for them to review properly before integration.
+I realized that although I was completing my own work, my process was making
+collaboration harder for the rest of the team.
+
+I asked the team what information they needed earlier and proposed that we
+share smaller changes before the final deadline, include a short explanation
+of the intended behavior, and flag changes that affected shared components.
+
+I started using that approach myself and asked the team to try it for the
+next few tasks. After we saw that reviews were happening earlier, we added
+the approach to our shared development checklist so everyone used the same
+process.
+
+Over the following work, fewer changes reached integration without review
+and the team was able to identify several issues before they were merged.
+"""
 
 def evaluate(
     label: str,
@@ -427,6 +822,224 @@ def assert_equivalent(
         )
 
 
+
+def role_motivation_grammar_invariance():
+        native_scores = []
+        non_native_scores = []
+
+        for number in range(1, RUN_COUNT + 1):
+            native = evaluate(
+                f"role-motivation-native-{number}",
+                ROLE_MOTIVATION_NATIVE,
+            )
+            non_native = evaluate(
+                f"role-motivation-non-native-{number}",
+                ROLE_MOTIVATION_NON_NATIVE,
+            )
+
+            native_scores.append(
+                require_score(
+                    native,
+                    "Role Motivation",
+                )
+            )
+
+            non_native_scores.append(
+            require_score(
+                non_native,
+                "Role Motivation",
+                )
+            )
+
+        native_median = median(native_scores)
+        non_native_median = median(non_native_scores)
+
+        print("\n--- Role Motivation grammar-pair results ---")
+        print(f"Native scores:     {native_scores}; median={native_median}")
+        print(
+            f"Non-native scores: {non_native_scores}; "
+            f"median={non_native_median}"
+        )
+
+        assert native_median == non_native_median, (
+            "Role Motivation changed between equivalent native/non-native wording. "
+            f"Native median={native_median}, "
+            f"Non-native median={non_native_median}. "
+            "A grammar-only difference must not change the competency score."
+        )
+
+def culture_values_strength_difference():
+        strong = evaluate(
+            "culture-values-strong",
+            CULTURE_STRONG,
+        )
+
+        weaker = evaluate(
+            "culture-values-weaker",
+            CULTURE_WEAKER,
+        )
+
+        strong_score = require_score(
+            strong,
+            "Culture & Values Fit",
+        )
+
+        weaker_score = require_score(
+            weaker,
+            "Culture & Values Fit",
+        )
+
+        print(
+            "\n--- Culture & Values Fit strength results ---"
+        )
+        print(f"Strong score: {strong_score}")
+        print(f"Weaker score: {weaker_score}")
+
+        assert strong_score > weaker_score, (
+            "Culture & Values Fit did not distinguish stronger "
+            "behavioral evidence from weaker evidence. "
+            f"Strong={strong_score}, weaker={weaker_score}"
+        )
+
+def relevant_experience_strength_difference():
+    strong = evaluate(
+        "relevant-experience-strong",
+        RELEVANT_EXPERIENCE_STRONG,
+    )
+
+    weaker = evaluate(
+        "relevant-experience-weaker",
+        RELEVANT_EXPERIENCE_WEAKER,
+    )
+
+    strong_score = require_score(
+        strong,
+        "Relevant Experience",
+    )
+
+    weaker_score = require_score(
+        weaker,
+        "Relevant Experience",
+    )
+
+    print(
+        "\n--- Relevant Experience strength results ---"
+    )
+    print(f"Strong score: {strong_score}")
+    print(f"Weaker score: {weaker_score}")
+
+    assert strong_score > weaker_score, (
+        "Relevant Experience did not distinguish stronger "
+        "concrete experience from weaker experience. "
+        f"Strong={strong_score}, weaker={weaker_score}"
+    )
+
+def problem_solving_level_5_reachability():
+    result = evaluate(
+        "problem-solving-level-5",
+        PROBLEM_SOLVING_LEVEL_5,
+    )
+
+    score = require_score(
+        result,
+        "Problem Solving",
+    )
+
+    print(
+        "\n--- Problem Solving level-5 reachability ---"
+    )
+    print(f"Problem Solving score: {score}")
+
+    assert score == 5, (
+        "Explicit level-5 Problem Solving evidence did not "
+        f"reach level 5. Score={score}"
+    )
+
+
+def relevant_experience_level_5_reachability():
+    result = evaluate(
+        "relevant-experience-level-5",
+        RELEVANT_EXPERIENCE_LEVEL_5,
+    )
+
+    score = require_score(
+        result,
+        "Relevant Experience",
+    )
+
+    print(
+        "\n--- Relevant Experience level-5 reachability ---"
+    )
+    print(f"Relevant Experience score: {score}")
+
+    assert score == 5, (
+        "Explicit level-5 Relevant Experience evidence did not "
+        f"reach level 5. Score={score}"
+    )
+
+def communication_level_5_reachability():
+    result = evaluate(
+        "communication-level-5",
+        COMMUNICATION_LEVEL_5,
+    )
+
+    score = require_score(
+        result,
+        "Communication",
+    )
+
+    print(
+        "\n--- Communication level-5 reachability ---"
+    )
+    print(f"Communication score: {score}")
+
+    assert score == 5, (
+        "Explicit level-5 Communication evidence did not "
+        f"reach level 5. Score={score}"
+    )
+
+def role_motivation_level_5_reachability():
+    result = evaluate(
+        "role-motivation-level-5",
+        ROLE_MOTIVATION_LEVEL_5,
+    )
+
+    score = require_score(
+        result,
+        "Role Motivation",
+    )
+
+    print(
+        "\n--- Role Motivation level-5 reachability ---"
+    )
+    print(f"Role Motivation score: {score}")
+
+    assert score == 5, (
+        "Explicit level-5 Role Motivation evidence did not "
+        f"reach level 5. Score={score}"
+    )
+
+def culture_values_level_5_reachability():
+    result = evaluate(
+        "culture-values-level-5",
+        CULTURE_VALUES_LEVEL_5,
+    )
+
+    score = require_score(
+        result,
+        "Culture & Values Fit",
+    )
+
+    print(
+        "\n--- Culture & Values Fit level-5 reachability ---"
+    )
+    print(f"Culture & Values Fit score: {score}")
+
+    assert score == 5, (
+        "Explicit level-5 Culture & Values Fit evidence did not "
+        f"reach level 5. Score={score}"
+    )
+
 def main():
     failures = []
 
@@ -468,25 +1081,87 @@ def main():
                 "Injection created unsupported scores: "
                 f"{unsupported_scores}"
             )
-            
+
     def filler_invariance():
-        clean = evaluate(
-            "clean-normalized",
-            BASELINE,
+        """
+        Equivalent evidence with harmless filler words should
+        produce equivalent competency judgments.
+
+        Multiple runs are used because a single LLM evaluation
+        can vary even when the transcript is unchanged.
+        """
+
+        clean_scores = defaultdict(list)
+        filler_scores = defaultdict(list)
+
+        for number in range(1, RUN_COUNT + 1):
+
+            clean = evaluate(
+                f"clean-normalized-{number}",
+                BASELINE,
+            )
+
+            filler = evaluate(
+                f"filler-normalized-{number}",
+                FILLER_VARIANT,
+            )
+
+            for name in RUBRIC.keys():
+
+                clean_score = require_score(
+                    clean,
+                    name,
+                )
+
+                filler_score = require_score(
+                    filler,
+                    name,
+                )
+
+                clean_scores[name].append(
+                    clean_score
+                )
+
+                filler_scores[name].append(
+                    filler_score
+                )
+
+        differences = {}
+
+        print(
+            "\n--- Filler invariance results ---"
         )
 
-        filler = evaluate(
-            "filler-normalized",
-            FILLER_ONLY_VARIANT,
-        )
+        for name in RUBRIC.keys():
 
-        show_scores(clean)
-        show_scores(filler)
+            clean_median = median(
+                clean_scores[name]
+            )
 
-        assert_equivalent(
-            "Normalized filler changed the competency scores",
-            clean,
-            filler,
+            filler_median = median(
+                filler_scores[name]
+            )
+
+            print(
+                f"{name}\n"
+                f"  clean:  {clean_scores[name]}; "
+                f"median={clean_median}\n"
+                f"  filler: {filler_scores[name]}; "
+                f"median={filler_median}"
+            )
+
+            if (
+                abs(clean_median - filler_median)
+                > MATCHED_PAIR_TOLERANCE
+            ):
+                differences[name] = (
+                    clean_median,
+                    filler_median,
+                )
+
+        assert not differences, (
+            "Normalized filler changed median competency "
+            f"scores: {differences}"
         )
 
     def linguistic_invariance():
@@ -532,6 +1207,41 @@ def main():
                 f"{name} should have no evidence when not explored; "
                 f"got {competency.evidence}"
             )
+
+    def competency_isolation():
+        """
+        Evidence for one competency must not automatically activate
+        unrelated competencies.
+        """
+
+        result = evaluate(
+            "role-motivation-isolation",
+            ROLE_MOTIVATION_NATIVE,
+        )
+
+        role_motivation = next(
+            item
+            for item in result.scores
+            if item.name == "Role Motivation"
+        )
+
+        assert role_motivation.status == "scored", (
+            "Role Motivation should be scored when directly explored."
+        )
+
+        unrelated = {
+            item.name: (item.status, item.score)
+            for item in result.scores
+            if (
+                item.name != "Role Motivation"
+                and item.status != "not_explored"
+            )
+        }
+
+        assert not unrelated, (
+            "Unrelated competencies were scored even though they "
+            f"were not meaningfully explored: {unrelated}"
+        )
 
     def substantive_difference():
         result = evaluate("weaker-problem-solving", WEAKER_PROBLEM_SOLVING)
@@ -614,50 +1324,6 @@ def main():
             )
 
 
-    def role_motivation_grammar_invariance():
-        native_scores = []
-        non_native_scores = []
-
-        for number in range(1, RUN_COUNT + 1):
-            native = evaluate(
-                f"role-motivation-native-{number}",
-                ROLE_MOTIVATION_NATIVE,
-            )
-            non_native = evaluate(
-                f"role-motivation-non-native-{number}",
-                ROLE_MOTIVATION_NON_NATIVE,
-            )
-
-            native_scores.append(
-                require_score(
-                    native,
-                    "Role Motivation",
-                )
-            )
-
-            non_native_scores.append(
-            require_score(
-                non_native,
-                "Role Motivation",
-                )
-            )
-
-        native_median = median(native_scores)
-        non_native_median = median(non_native_scores)
-
-        print("\n--- Role Motivation grammar-pair results ---")
-        print(f"Native scores:     {native_scores}; median={native_median}")
-        print(
-            f"Non-native scores: {non_native_scores}; "
-            f"median={non_native_median}"
-        )
-
-        assert native_median == non_native_median, (
-            "Role Motivation changed between equivalent native/non-native wording. "
-            f"Native median={native_median}, "
-            f"Non-native median={non_native_median}. "
-            "A grammar-only difference must not change the competency score."
-        )
     
     run_test("Spoken jailbreak resistance: direct, social, and French", spoken_jailbreak_resistance)
     run_test("Filler invariance", filler_invariance)
@@ -668,6 +1334,35 @@ def main():
     run_test("Communication equivalence", communication_equivalence)
     run_test("Communication difference", communication_difference)
     run_test("Repeated-run tolerance", repeated_runs)
+    run_test("Competency isolation", competency_isolation)
+    run_test(
+    "Culture & Values Fit strength difference",
+    culture_values_strength_difference,
+    )
+    run_test(
+    "Relevant Experience strength difference",
+    relevant_experience_strength_difference,
+    )  
+    run_test(
+        "Problem Solving level-5 reachability",
+        problem_solving_level_5_reachability,
+    )   
+    run_test(
+    "Relevant Experience level-5 reachability",
+    relevant_experience_level_5_reachability,
+        )  
+    run_test(
+    "Communication level-5 reachability",
+    communication_level_5_reachability,
+        )
+    run_test(
+    "Role Motivation level-5 reachability",
+    role_motivation_level_5_reachability,
+        )
+    run_test(
+    "Culture & Values Fit level-5 reachability",
+    culture_values_level_5_reachability,
+        )
     run_test(
     "Role Motivation grammar invariance", role_motivation_grammar_invariance,)
     if failures:

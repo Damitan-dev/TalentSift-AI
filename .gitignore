@@ -4,3 +4,5 @@ __pycache__/
 
 # Saved interview/session data
 data/
+# Local test / LLM evaluation artifacts
+test_artifacts/
