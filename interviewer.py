@@ -559,7 +559,10 @@ async def receive(ws): #For receiving everything the AI sends back
                             )
                             print(f"\n✅ Interview completed and saved: {session.id}")
                             print(f"✅ Scorecard saved: {scorecard_path}")
-                            print(f"✅ Overall score: {scorecard.overall}/5")
+                            if scorecard.overall is None:
+                                print("⚠ Overall score unavailable: no competencies were scored.")
+                            else:
+                                print(f"✅ Overall score: {scorecard.overall}/5")
 
                         except (EvaluationFailedError, ValueError) as error:
                             print(f"\n✅ Interview completed and saved: {session.id}")

@@ -10,7 +10,11 @@ NAME_INTRODUCTION = re.compile(
 
 def redact_candidate_identity(text: str) -> str:
     """
-    Remove a candidate's name from evaluator-facing text only.
+    Redact candidate names from common self-introduction patterns
+    in evaluator-facing text.
+
+    This is a conservative Phase 1 safeguard and is not a general
+    person-name detector.
 
     The original transcript is NOT modified.
     """
