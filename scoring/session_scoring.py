@@ -23,6 +23,44 @@ class ScorecardRepo:
         return path
 
 
+def format_scorecard_summary(scorecard) -> str:
+    """
+    Create a compact terminal-friendly summary of a scorecard.
+
+    A not_explored competency is displayed with "-" rather than
+    being presented as a numeric score.
+    """
+
+    lines = [
+        "",
+        "SCORECARD SUMMARY",
+        "-" * 72,
+        f"{'Competency':<28} {'Status':<16} {'Score':<8}",
+        "-" * 72,
+    ]
+
+    for result in scorecard.scores:
+        if result.score is None:
+            score_text = "-"
+        else:
+            score_text = str(result.score)
+
+        lines.append(
+            f"{result.name:<28} "
+            f"{result.status:<16} "
+            f"{score_text:<8}"
+        )
+
+    lines.append("-" * 72)
+
+    if scorecard.overall is None:
+        lines.append("Overall: unavailable")
+    else:
+        lines.append(f"Overall: {scorecard.overall}/5")
+
+    return "\n".join(lines)
+
+
 def build_transcripts(session) -> tuple[str, str, str]:
     """
     Produces three transcript versions:
@@ -36,10 +74,10 @@ def build_transcripts(session) -> tuple[str, str, str]:
        Used by the AI evaluator.
 
     3. evidence_transcript:
-   Original candidate speech only.
-   Used ONLY as the authoritative source for verbatim evidence.
-   Interviewer speech is intentionally excluded because it is never
-   valid candidate evidence.
+       Original candidate speech only.
+       Used ONLY as the authoritative source for verbatim evidence.
+       Interviewer speech is intentionally excluded because it is never
+       valid candidate evidence.
     """
 
     full_lines = []

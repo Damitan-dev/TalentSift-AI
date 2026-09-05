@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from models import Session, TranscriptTurn, utc_now
 # Import utc_now so we can record the exact completion time.
 # Session represents the whole interview.
-# TranscriptTurn represents one candidate/Alex turn.
+# TranscriptTurn represents one candidate/Bianca turn.
 
 from storage import SessionRepo
 # SessionRepo handles saving/loading interview sessions.
@@ -18,7 +18,10 @@ import time #To measure the latency
 import statistics # To help us calculate the median formus
 from pathlib import Path  # Helps us build a reliable path to the prompt file.
 from scoring.engine import EvaluationFailedError
-from scoring.session_scoring import score_saved_session
+from scoring.session_scoring import (
+    format_scorecard_summary,
+    score_saved_session,
+)
 
 #Part 1: Connect and Configure
 load_dotenv()
@@ -42,14 +45,14 @@ fade_requested = asyncio.Event()
 BASE_DIR = Path(__file__).resolve().parent
 
 
-# Build the path to Alex's instruction file.
+# Build the path to Bianca's instruction file.
 PROMPT_FILE = BASE_DIR / "prompts" / "interviewer_prompt.txt"
 
 # The language selected for this interview session.
 LANGUAGE = "English"
 
 
-# Read Alex's instruction template from the prompt file.
+# Read Bianca's instruction template from the prompt file.
 prompt_template = PROMPT_FILE.read_text(
     encoding="utf-8"
 )
@@ -71,7 +74,7 @@ CONTROLLED_TEST_QUESTION = (
 
 if TEST_MODE:
     INSTRUCTIONS = f"""
-You are Alex, running a controlled speech-fairness test.
+You are Bianca, running a controlled speech-fairness test.
 
 This is not a normal dynamic TalentSift interview.
 
@@ -164,9 +167,9 @@ async def main():
     {
         "type": "function",  # Tell Realtime that this is a function handled by our Python application.
 
-        "name": "finish_interview",  # This is the name Alex will call when the whole interview is finished.
+        "name": "finish_interview",  # This is the name Bianca will call when the whole interview is finished.
 
-        "description": finish_tool_description,  # Helps Alex understand exactly when this function should be used.
+        "description": finish_tool_description,  # Helps Bianca understand exactly when this function should be used.
 
         "parameters": {
             "type": "object",  # The function accepts an object of arguments.
@@ -179,7 +182,7 @@ async def main():
 ],
 
 "tool_choice": "auto",
-# Allow Alex to decide when the finish_interview tool is appropriate.
+# Allow Bianca to decide when the finish_interview tool is appropriate.
             },
         }
 
@@ -191,8 +194,18 @@ async def main():
                           blocksize=CHUNK_SAMPLES, callback=on_mic) #setting the mic stream
 
 
-        mic.start() #start recording
-        await asyncio.gather(send_mic(ws), receive(ws))  
+        mic.start()
+
+        try:
+            await asyncio.gather(
+                send_mic(ws),   
+                receive(ws),
+            )
+        finally:
+            await asyncio.to_thread(mic.stop)
+            await asyncio.to_thread(mic.close)
+
+            print("\n🎤 Microphone closed.")
 
 
         
@@ -242,9 +255,9 @@ async def graceful_stop(ws, speaker, playback_state):  # We need ws to send trun
 
     await asyncio.sleep(
         INTERRUPT_GRACE_MS / 1000
-    )  # Give Alex the tiny 40 ms graceful tail before stopping him.
+    )  # Give Bianca the tiny 40 ms graceful tail before stopping him.
 
-    flush_playback()  # Delete all Alex audio that is still waiting inside our Python queue.
+    flush_playback()  # Delete all Bianca audio that is still waiting inside our Python queue.
 
     await asyncio.to_thread(
         speaker.abort
@@ -252,23 +265,23 @@ async def graceful_stop(ws, speaker, playback_state):  # We need ws to send trun
 
     await asyncio.to_thread(
         speaker.start
-    )  # Restart the audio stream so Alex's next response can play normally.
+    )  # Restart the audio stream so Bianca's next response can play normally.
 
-    playback_state["playing"] = False  # Alex's interrupted local playback has now been stopped.
+    playback_state["playing"] = False  # Bianca's interrupted local playback has now been stopped.
 
-    item_id = playback_state["item_id"]  # Find out which Alex message the candidate was hearing.
+    item_id = playback_state["item_id"]  # Find out which Bianca message the candidate was hearing.
 
     played_ms = int(
         playback_state["played_ms"]
     )  # Find approximately how many milliseconds of that message the candidate heard.
 
-    if item_id is not None and played_ms > 0:  # Only truncate if we actually have an Alex message and some audio was heard.
+    if item_id is not None and played_ms > 0:  # Only truncate if we actually have an Bianca message and some audio was heard.
 
-        truncate_event = {  # Build the Realtime event that tells OpenAI where the candidate stopped hearing Alex.
+        truncate_event = {  # Build the Realtime event that tells OpenAI where the candidate stopped hearing Bianca.
             "type": "conversation.item.truncate",  # Tell OpenAI that we're shortening an earlier assistant audio message.
-            "item_id": item_id,  # Identify the exact Alex message that was interrupted.
+            "item_id": item_id,  # Identify the exact Bianca message that was interrupted.
             "content_index": 0,  # OpenAI requires the audio content index to be 0 for this truncation event.
-            "audio_end_ms": played_ms  # Keep only the amount of Alex audio the candidate actually heard.
+            "audio_end_ms": played_ms  # Keep only the amount of Bianca audio the candidate actually heard.
         }
 
         await ws.send(
@@ -277,16 +290,16 @@ async def graceful_stop(ws, speaker, playback_state):  # We need ws to send trun
 
 
 # For the from queue  to speaker
-async def player(speaker, playback_state):  # Plays Alex's audio and tracks what the candidate actually hears.
+async def player(speaker, playback_state):  # Plays Bianca's audio and tracks what the candidate actually hears.
     while True:  # Keep the playback worker alive throughout the interview.
 
-        item_id, chunk = await play_q.get()  # Wait for the next Alex message ID + audio chunk.
+        item_id, chunk = await play_q.get()  # Wait for the next Bianca message ID + audio chunk.
 
-        if playback_state["item_id"] != item_id:  # Check whether this chunk belongs to a new Alex message.
-            playback_state["item_id"] = item_id  # Store the ID of the new Alex message.
+        if playback_state["item_id"] != item_id:  # Check whether this chunk belongs to a new Bianca message.
+            playback_state["item_id"] = item_id  # Store the ID of the new Bianca message.
             playback_state["played_ms"] = 0.0  # Reset heard duration because this is a new message.
 
-        playback_state["playing"] = True  # Alex now has audio being played locally.
+        playback_state["playing"] = True  # Bianca now has audio being played locally.
 
         await asyncio.to_thread(
             speaker.write,
@@ -302,9 +315,23 @@ async def player(speaker, playback_state):  # Plays Alex's audio and tracks what
         if (
             play_q.empty()
             and not playback_state["response_active"]
-        ):  # Only call Alex finished when the queue is empty AND OpenAI has finished producing the response.
+        ):  # Only call Bianca finished when the queue is empty AND OpenAI has finished producing the response.
 
-            playback_state["playing"] = False  # Alex is now genuinely finished with local playback.
+            playback_state["playing"] = False  # Bianca is now genuinely finished with local playback.
+
+
+async def wait_for_playback_to_finish(playback_state):
+    """
+    Wait until Bianca's current response has completely finished
+    playing through the local speaker.
+    """
+
+    while (
+        playback_state["playing"]
+        or not play_q.empty()
+        or playback_state["response_active"]
+    ):
+        await asyncio.sleep(0.05)
 
 #For flushing the queue when the candidate speak when the A.I is speaking
 def flush_playback():
@@ -336,16 +363,17 @@ async def receive(ws): #For receiving everything the AI sends back
     speaker = sd.RawOutputStream(samplerate=SPK_RATE, channels=1, dtype="int16")#creates speaker output stream and OPENAI returns audio in PCM16 that is why it is int16
     speaker.start()  # Start the physical audio output stream.
 
-    playback_state = {  # Shared information about the Alex audio currently being played.
-        "item_id": None,  # No Alex message has been played yet when the interview starts.
-        "played_ms": 0.0,  # The candidate has heard 0 ms of Alex so far.
-        "playing": False,  # Alex is not currently playing through the speaker yet.
-        "response_active": False  # True while OpenAI is still producing Alex's current response.
+    playback_state = {  # Shared information about the Bianca audio currently being played.
+        "item_id": None,  # No Bianca message has been played yet when the interview starts.
+        "played_ms": 0.0,  # The candidate has heard 0 ms of Bianca so far.
+        "playing": False,  # Bianca is not currently playing through the speaker yet.
+        "response_active": False  # True while OpenAI is still producing Bianca's current response.
     }
 
-    asyncio.create_task(
+    player_task = asyncio.create_task(
         player(speaker, playback_state)
-    )  # Start the player in the background and give it access to our playback tracking information.
+        )
+      # Start the player in the background and give it access to our playback tracking information.
 
 
     interview_started = False
@@ -382,8 +410,13 @@ async def receive(ws): #For receiving everything the AI sends back
 
     finishing_interview = False
     # False = normal interview is still happening.
-    # True = Alex has finished asking questions and we are waiting for the final closing.
+    # True = Bianca has finished asking questions and we are waiting for the final closing.
 
+    finalization_pending = False
+    # False = normal interview lifecycle.
+    # True = the final closing transcript has been saved and the
+    # interview should be scored as soon as Bianca's closing audio
+    # has completely finished playing.
     try:
         async for raw in ws: #waiting for messages from the websocket
             event = json.loads(raw) #convert the json text into python dictionary
@@ -391,7 +424,7 @@ async def receive(ws): #For receiving everything the AI sends back
            
 
             if etype == "session.updated" and not interview_started:
-                print("✅ Session ready. Alex is starting...")
+                print("✅ Session ready. Bianca is starting...")
                 interview_started = True
                 start_event = {
                     "type": "response.create"
@@ -399,7 +432,7 @@ async def receive(ws): #For receiving everything the AI sends back
                 await ws.send(json.dumps(start_event))
         
             elif etype == "response.output_audio.delta":
-                if waiting_first_delta and turn_ended_at is not None:  # Only measure the first Alex audio after the candidate's turn ended.
+                if waiting_first_delta and turn_ended_at is not None:  # Only measure the first Bianca audio after the candidate's turn ended.
                     response_gap_ms = (time.monotonic() - turn_ended_at) * 1000  # Calculate the post-VAD response delay in milliseconds.
 
                     print(f"\n⏱️ Response gap: {response_gap_ms:.0f} ms")  # Show the latency during testing.
@@ -412,11 +445,11 @@ async def receive(ws): #For receiving everything the AI sends back
                     waiting_first_delta = False  # We've measured the first delta, so don't measure the remaining chunks.
 
 
-                if not interrupted:  # Only accept Alex audio if the candidate has NOT barged in.
+                if not interrupted:  # Only accept Bianca audio if the candidate has NOT barged in.
 
                     audio_bytes = base64.b64decode(event["delta"])  # Convert OpenAI's Base64 audio back into raw PCM16 bytes.
 
-                    item_id = event["item_id"]  # Get the ID of the exact Alex message this audio belongs to.
+                    item_id = event["item_id"]  # Get the ID of the exact Bianca message this audio belongs to.
 
                     for i in range(0, len(audio_bytes), CHUNK_BYTES):  # Break the received audio into small chunks.
 
@@ -424,7 +457,7 @@ async def receive(ws): #For receiving everything the AI sends back
 
                         play_q.put_nowait(
                             (item_id, chunk)
-                        )  # Store BOTH the Alex message ID and audio together in the queue.
+                        )  # Store BOTH the Bianca message ID and audio together in the queue.
 
 
 
@@ -437,27 +470,27 @@ async def receive(ws): #For receiving everything the AI sends back
                 )  # Show that candidate speech has been detected.
 
 
-                if playback_state["playing"]:  # Check whether Alex is STILL locally audible when the candidate starts speaking.
+                if playback_state["playing"]:  # Check whether Bianca is STILL locally audible when the candidate starts speaking.
 
-                    interrupted = True  # This is genuine barge-in, so stop accepting new audio from Alex's interrupted response.
+                    interrupted = True  # This is genuine barge-in, so stop accepting new audio from Bianca's interrupted response.
 
                     asyncio.create_task(
                         graceful_stop(
                             ws,  # Needed so graceful_stop can send conversation.item.truncate.
                             speaker,  # Needed so graceful_stop can stop the local speaker.
-                            playback_state  # Needed to know which Alex message was playing and how much was heard.
+                            playback_state  # Needed to know which Bianca message was playing and how much was heard.
                         )
                     )  # Run interruption handling in the background so receive() can keep processing WebSocket events.
                     print(
-                        "\n✋ Alex yielding"
-                    )  # Confirm that the candidate actually interrupted Alex.
+                        "\n✋ Bianca yielding"
+                    )  # Confirm that the candidate actually interrupted Bianca.
 
-                else:  # Alex had already finished speaking before the candidate began.
+                else:  # Bianca had already finished speaking before the candidate began.
 
                     print(
                         "\r🎤 Normal candidate turn",
                         end=""
-                    )  # This is ordinary conversation, so DO NOT abort, flush, or truncate Alex's previous question.
+                    )  # This is ordinary conversation, so DO NOT abort, flush, or truncate Bianca's previous question.
 
 
 
@@ -489,7 +522,7 @@ async def receive(ws): #For receiving everything the AI sends back
 
 
             elif etype == "response.output_audio_transcript.done":
-                # Get Alex's completed spoken transcript.
+                # Get Bianca's completed spoken transcript.
                 interviewer_text = event.get("transcript", "").strip()
 
                 # Ignore empty transcript events.
@@ -498,18 +531,18 @@ async def receive(ws): #For receiving everything the AI sends back
                     session.transcript.append(
                         TranscriptTurn(
                             speaker="interviewer",
-                            # Alex produced this turn.
+                            # Bianca produced this turn.
 
                             text=interviewer_text,
-                            # Save exactly what Alex said.
+                            # Save exactly what Bianca said.
 
                             item_id=event.get("item_id")
                             # Keep the corresponding conversation item ID.
                         )
                     )
 
-                    # Show Alex's completed transcript while testing.
-                    print(f"\n📝 Alex: {interviewer_text}")
+                    # Show Bianca's completed transcript while testing.
+                    print(f"\n📝 Bianca: {interviewer_text}")
 
 
                     completed_now = False
@@ -520,16 +553,16 @@ async def receive(ws): #For receiving everything the AI sends back
 
                     if finishing_interview:
                         # finish_interview was already called,
-                        # so this transcript is Alex's final closing.
+                        # so this transcript is Bianca's final closing.
 
                         session.status = "completed"
                         # NOW the whole interview is actually finished.
 
                         session.ended_at = utc_now()
-                        # Record the exact time Alex finished the closing.
+                        # Record the exact time Bianca finished the closing.
 
                         finishing_interview = False
-                        # Reset this so another Alex response cannot
+                        # Reset this so another Bianca response cannot
                         # accidentally complete the interview again.
 
                         completed_now = True
@@ -537,7 +570,7 @@ async def receive(ws): #For receiving everything the AI sends back
 
 
                     repo.save(session)
-                    # Save after every Alex turn.
+                    # Save after every Bianca turn.
                     #
                     # During the interview:
                     #   status = "in_progress"
@@ -551,33 +584,24 @@ async def receive(ws): #For receiving everything the AI sends back
 
 
                     if completed_now:
-                        # The final closing transcript is now saved, so score the complete session.
-                        try:
-                            scorecard, scorecard_path = score_saved_session(
-                                session_id=session.id,
-                                session_repo=repo,
-                            )
-                            print(f"\n✅ Interview completed and saved: {session.id}")
-                            print(f"✅ Scorecard saved: {scorecard_path}")
-                            if scorecard.overall is None:
-                                print("⚠ Overall score unavailable: no competencies were scored.")
-                            else:
-                                print(f"✅ Overall score: {scorecard.overall}/5")
-
-                        except (EvaluationFailedError, ValueError) as error:
-                            print(f"\n✅ Interview completed and saved: {session.id}")
-                            print(f"⚠ Scoring failed: {error}")
-
+                        finalization_pending = True
+                        # The final closing transcript is safely persisted.
+                        #
+                        # Do NOT score yet. The transcript can finish before the
+                        # candidate has actually heard all of Bianca's closing audio.
+                        #
+                        # We will finalize when response.done arrives and local
+                        # playback has completely drained.
 
             elif etype == "response.function_call_arguments.done":
                 # The model has finished requesting one of our Python functions.
 
                 function_name = event.get("name")
-                # Find out which function Alex requested.
+                # Find out which function Bianca requested.
 
 
                 if function_name == "finish_interview":
-                    # Alex has decided that all required interview questions are finished.
+                    # Bianca has decided that all required interview questions are finished.
 
                     finishing_interview = True
                     # IMPORTANT:
@@ -588,7 +612,7 @@ async def receive(ws): #For receiving everything the AI sends back
                     call_id = event.get("call_id")
                     # Every function call has an ID.
                     # OpenAI uses this to connect our function result
-                    # back to the function Alex called.
+                    # back to the function Bianca called.
 
 
                     tool_result = {
@@ -604,7 +628,7 @@ async def receive(ws): #For receiving everything the AI sends back
                             "output": json.dumps({
                                 "status": "ready_to_close"
                             })
-                            # Tell Alex that Python accepted the request
+                            # Tell Bianca that Python accepted the request
                             # and he should now perform the final closing.
                         }
                     }
@@ -638,20 +662,53 @@ async def receive(ws): #For receiving everything the AI sends back
                 turn_ended_at = time.monotonic()# start tehs top watch now
                 waiting_first_delta = True
 
-            elif etype == "response.created":  # OpenAI has started creating a new Alex response.
+            elif etype == "response.created":  # OpenAI has started creating a new Bianca response.
                 interrupted = False  # Allow audio from this new response into the playback queue.
-                playback_state["response_active"] = True  # Remember that OpenAI is currently producing Alex's response.
+                playback_state["response_active"] = True  # Remember that OpenAI is currently producing Bianca's response.
 
-            elif etype == "response.done":  # OpenAI has finished generating/sending Alex's current response.
-                playback_state["response_active"] = False  # The server is no longer producing this Alex response.
-                if play_q.empty():  # If there is also no remaining Alex audio waiting locally...
-                    playback_state["playing"] = False  # ...then Alex is genuinely no longer audible.
+            elif etype == "response.done":
+                # OpenAI has finished generating Bianca's current response.
+                playback_state["response_active"] = False
+
+                if play_q.empty():
+                    playback_state["playing"] = False
+
                 print("\r🤖 interviewer response generated.")
+
+                if finalization_pending:
+                    # This response is Bianca's final closing.
+                    #
+                    # OpenAI has finished generating it, but some audio may
+                    # still be waiting in our local playback queue.
+
+                    await wait_for_playback_to_finish(playback_state)
+
+                    print("\n🏁 Closing audio finished. Finalizing interview...")
+
+                    try:
+                        scorecard, scorecard_path = await asyncio.to_thread(
+                            score_saved_session,
+                            session_id=session.id,
+                            session_repo=repo,
+                        )
+
+                        print(f"\n✅ Interview completed and saved: {session.id}")
+                        print(f"✅ Scorecard saved: {scorecard_path}")
+                        print(format_scorecard_summary(scorecard))
+
+                    except (EvaluationFailedError, ValueError) as error:
+                        print(f"\n✅ Interview completed and saved: {session.id}")
+                        print(f"⚠ Scoring failed: {error}")
+
+                    finalization_pending = False
+
+                    await ws.close()
+                    return
 
             elif etype == "conversation.item.truncated":  # OpenAI sends this when our truncate request succeeds.
 
                 print(
-                    f"\n✂️ Alex memory truncated at {event['audio_end_ms']} ms"
+                    f"\n✂️ Bianca memory truncated at {event['audio_end_ms']} ms"
                 )  # Show exactly where OpenAI says the assistant audio was truncated.
 
             elif etype == "error":
@@ -665,6 +722,20 @@ async def receive(ws): #For receiving everything the AI sends back
         print(
             f"\n❌ Realtime connection lost: {e}"
         )
+
+
+    finally:
+            player_task.cancel()
+
+            try:
+                await player_task
+            except asyncio.CancelledError:
+                pass
+
+            await asyncio.to_thread(speaker.stop)
+            await asyncio.to_thread(speaker.close)
+
+            print("🔊 Speaker closed.")
 
 
 
