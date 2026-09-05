@@ -119,7 +119,7 @@ async def main():
                 if TEST_MODE
                 else (
                     "Call this only after all required interview competencies "
-                    "have been explored and the final closing has been given."
+                    "have been explored and before giving the final closing."
                 )
             )
         session_config = {
