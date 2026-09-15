@@ -1,60 +1,1428 @@
 <!doctype html>
-<button id="start">Start echo</button>
-<script>
-const SAMPLE_RATE = 16000;   // what realtime engines expect and also the number of snapshot per second
-let ws;
- 
- // to ask permission from user before recording and also async because user s might take time deciding.
-document.getElementById("start").onclick = async () => {
-  ws = new WebSocket("ws://localhost:8765"); //Creates live connection
-  ws.binaryType = "arraybuffer"; //Data representation using raw bytes
-  ws.onmessage = (e) => playChunk(e.data);       // wired up on Thursday,An event programming to tell Javascript that whenever something arrives call playChunk()
- 
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); //"Ask the browser for permission to access the user's microphone. Wait until the user makes a decision. If permission is granted, the browser opens the microphone and returns a live stream of audio samples, which I store in stream so the rest of my application can process it."
-  const ctx    = new AudioContext({ sampleRate: SAMPLE_RATE }); //Creating the audio engine in charge of managing any audio object
-  const source = ctx.createMediaStreamSource(stream); //Represent microphone inside the AudioContext
-  const proc   = ctx.createScriptProcessor(1024, 1, 1);  // ~64ms; fine for a sandbox
- 
-  proc.onaudioprocess = (e) => {
-    const float32 = e.inputBuffer.getChannelData(0);  // floats, -1.0 .. 1.0
-    const pcm16   = floatTo16BitPCM(float32);
-    if (ws.readyState === WebSocket.OPEN) ws.send(pcm16);
-  };
-  source.connect(proc); proc.connect(ctx.destination);
-};
- 
-// TODO #2 — THE FORMAT CONVERSION (the heart of the exercise)
-function floatTo16BitPCM(float32) {
-  const out = new Int16Array(float32.length);
-  for (let i = 0; i < float32.length; i++) {
-    // a) clamp the sample into the range -1 .. 1 (Math.max / Math.min)
-    const sample = Math.max(-1,Math.min(1,float32[i]));
-    // b) scale to 16-bit integers: negative × 32768, positive × 32767
-    // out[i] = ...;
-    out[i] = sample < 0
-        ? sample * 32768
-        : sample * 32767;
-  }
-  return out.buffer;
+
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>TalentSift Interview</title>
+</head>
+
+<body>
+
+    <h1>TalentSift AI</h1>
+
+    <!--
+        Clicking this button will now do TWO things:
+
+        1. Connect the browser to FastAPI through WebSocket.
+        2. Ask permission to use the candidate's microphone.
+    -->
+    <button id="start">
+        Start Interview
+    </button>
+
+
+    <!--
+        We use this to show what state the browser is currently in.
+    -->
+    <p id="status">
+        Not connected
+    </p>
+
+    <h2>Transcript</h2>
+
+    <div id="transcript"></div>
+
+
+    <script>
+
+        // -----------------------------------------------------
+        // AUDIO CONFIGURATION
+        // -----------------------------------------------------
+
+        // We use 24,000 audio samples every second.
+        //
+        // This matches the 24 kHz PCM configuration
+        // used by our current Realtime interview pipeline.
+        const SAMPLE_RATE = 24000;
+
+
+        // This variable will eventually contain our
+        // live browser <-> FastAPI WebSocket.
+        let ws;
+
+
+        // -----------------------------------------------------
+        // BIANCA PLAYBACK STATE
+        // -----------------------------------------------------
+
+        // Separate AudioContext used for playing
+        // Bianca through the browser speakers.
+        let playCtx;
+
+
+        // This stores the time at which the NEXT
+        // Bianca audio chunk should begin playing.
+        //
+        // It allows chunks to line up one after another
+        // instead of all trying to play immediately.
+        let nextPlayTime = 0;
+
+
+        // -----------------------------------------------------
+        // BIANCA PLAYBACK POSITION
+        // -----------------------------------------------------
+
+        // Which Bianca conversation item is currently
+        // being played?
+        let currentBiancaItemId = null;
+
+
+        // Which content part inside that item?
+        // For our audio this will normally be 0.
+        let currentBiancaContentIndex = 0;
+
+
+        // AudioContext time at which THIS Bianca item
+        // actually begins playing.
+        //
+        // IMPORTANT:
+        // This is not when FastAPI receives the audio.
+        // It is when Chrome schedules the first audible
+        // chunk to begin.
+        let biancaPlaybackStartedAt = null;
+
+
+        // AudioContext time at which all currently
+        // scheduled audio for this Bianca item will end.
+        let biancaScheduledEndAt = null;
+
+
+
+        // -----------------------------------------------------
+        // NATURAL INTERRUPTION PLAYBACK STATE
+        // -----------------------------------------------------
+
+        // GainNode is our programmable volume control.
+        //
+        // Bianca audio will travel:
+        //
+        // audio source
+        //      ↓
+        // biancaGainNode
+        //      ↓
+        // laptop speaker
+        let biancaGainNode = null;
+
+
+        // Keep references to Bianca audio sources that are
+        // currently playing OR scheduled to play.
+        //
+        // We need these references so an interruption can
+        // cancel the remaining queued audio.
+        const activeBiancaSources =
+            new Set();
+
+
+
+
+        // When true, ignore any leftover audio chunks from
+        // the interrupted Bianca response.
+        let biancaInterrupted = false;
+
+
+        // Very short fade.
+        // Long enough to avoid a harsh click/cut,
+        // short enough that Bianca does not talk over
+        // the candidate.
+        const INTERRUPT_FADE_MS = 80;
+
+        // Holds the current unfinished candidate transcript.
+        let liveCandidateText = "";
+
+        // Holds the HTML element currently showing
+        // the candidate's unfinished turn.
+        let liveCandidateElement = null;
+
+        // -----------------------------------------------------
+        // BIANCA CAPTION STATE
+        // -----------------------------------------------------
+
+        // Timer currently revealing Bianca's transcript.
+        let interviewerCaptionTimer = null;
+
+        // -----------------------------------------------------
+        // START BUTTON
+        // -----------------------------------------------------
+
+        document.getElementById("start").onclick = async () => {
+
+            // -------------------------------------------------
+            // 1. CONNECT TO FASTAPI
+            // -------------------------------------------------
+
+            // Create a WebSocket connection from the browser
+            // to our FastAPI application.
+            //
+            // browser-test-001 is only a temporary session ID.
+            ws = new WebSocket(
+                "ws://localhost:8000/ws/interview/browser-test-001"
+            );
+
+
+            // -------------------------------------------------
+            // 2. WHEN FASTAPI ACCEPTS THE CONNECTION
+            // -------------------------------------------------
+
+            ws.onopen = async () => {
+
+                console.log(
+                    "Connected to TalentSift FastAPI server"
+                );
+
+                document.getElementById("status").textContent =
+                    "Connected — requesting microphone";
+
+
+                // ---------------------------------------------
+                // ASK FOR MICROPHONE PERMISSION
+                // ---------------------------------------------
+
+                // navigator.mediaDevices represents browser
+                // access to devices such as the microphone.
+                //
+                // getUserMedia({ audio: true }) means:
+                //
+                // "Browser, please ask the user for permission
+                // to use their microphone."
+                //
+                // await means JavaScript waits here until the
+                // person accepts or rejects the permission.
+                const stream =
+                    await navigator.mediaDevices.getUserMedia({
+                        audio: {
+
+                            // Try to remove Bianca's speaker output
+                            // from the microphone input.
+                            echoCancellation: true,
+
+                            // Reduce steady environmental noise.
+                            noiseSuppression: true,
+
+                            // Let the browser keep candidate volume
+                            // reasonably usable.
+                            autoGainControl: true
+                        }
+                    });
+
+
+                console.log(
+                    "Microphone permission granted"
+                );
+
+                document.getElementById("status").textContent =
+                    "Microphone active";
+
+
+                // ---------------------------------------------
+                // CREATE THE BROWSER AUDIO ENGINE
+                // ---------------------------------------------
+
+                // AudioContext is the browser's audio-processing
+                // environment.
+                //
+                // Think of it as the audio workspace where we can
+                // access and transform microphone samples.
+                const ctx = new AudioContext({
+                    sampleRate: SAMPLE_RATE
+                });
+
+
+                // ---------------------------------------------
+                // BRING THE MICROPHONE INTO AudioContext
+                // ---------------------------------------------
+
+                // "stream" is the live microphone.
+                //
+                // createMediaStreamSource() turns that microphone
+                // stream into something AudioContext can process.
+                const source =
+                    ctx.createMediaStreamSource(stream);
+
+
+                // ---------------------------------------------
+                // PROCESS AUDIO IN SMALL CHUNKS
+                // ---------------------------------------------
+
+                // Instead of waiting for a whole minute of audio,
+                // we process small groups of samples continuously.
+                //
+                // 1024 means each processing callback receives
+                // approximately 1024 audio samples at a time.
+                //
+                // This ScriptProcessor approach comes from our
+                // Week 1 sandbox and is fine for this development
+                // relay test.
+                const processor =
+                    ctx.createScriptProcessor(
+                        1024,
+                        1,
+                        1
+                    );
+
+
+                // ---------------------------------------------
+                // RUN EVERY TIME AN AUDIO CHUNK ARRIVES
+                // ---------------------------------------------
+
+                processor.onaudioprocess = (event) => {
+
+                    // The microphone gives browser audio as
+                    // Float32 values approximately between:
+                    //
+                    // -1.0 and +1.0
+                    const float32 =
+                        event.inputBuffer.getChannelData(0);
+
+
+                    // Convert browser Float32 samples into PCM16.
+                    //
+                    // PCM16 is the integer audio format our
+                    // Realtime pipeline expects.
+                    const pcm16 =
+                        floatTo16BitPCM(float32);
+
+
+                    // Make sure the WebSocket is actually open
+                    // before trying to send anything.
+                    if (
+                        ws.readyState === WebSocket.OPEN
+                    ) {
+
+                        // Convert our binary PCM16 audio into
+                        // Base64 text.
+                        const audioBase64 =
+                            arrayBufferToBase64(pcm16);
+
+
+                        // Send one JSON MESSAGE to FastAPI.
+                        //
+                        // The important part is:
+                        //
+                        // type = tells FastAPI WHAT this is.
+                        //
+                        // data = contains the actual audio.
+                        ws.send(
+                            JSON.stringify({
+                                type: "audio",
+                                data: audioBase64
+                            })
+                        );
+                    }
+                };
+
+
+                // ---------------------------------------------
+                // CONNECT THE AUDIO PROCESSING PIPELINE
+                // ---------------------------------------------
+
+                // microphone
+                //     ↓
+                // processor
+                //
+                // This allows processor.onaudioprocess()
+                // to receive microphone samples.
+                source.connect(processor);
+
+
+                // ScriptProcessor needs to be connected into
+                // the AudioContext graph so the browser keeps
+                // processing it.
+                //
+                // We are NOT intentionally playing the microphone
+                // back to the candidate here.
+                processor.connect(
+                    ctx.destination
+                );
+            };
+
+
+            // -------------------------------------------------
+            // MESSAGE FROM FASTAPI
+            // -------------------------------------------------
+
+           ws.onmessage = (event) => {
+
+    // JSON text -> JavaScript object
+    const msg =
+        JSON.parse(event.data);
+
+
+    // -------------------------------------------------
+    // STATUS
+    // -------------------------------------------------
+
+    if (msg.type === "status") {
+
+        document.getElementById(
+            "status"
+        ).textContent =
+            msg.value;
+    }
+
+    // -------------------------------------------------
+    // CANDIDATE INTERRUPTED BIANCA
+    // -------------------------------------------------
+
+    else if (msg.type === "interrupt") {
+
+        gracefullyInterruptBianca();
+    }
+
+
+    // -------------------------------------------------
+    // BIANCA AUDIO
+    // -------------------------------------------------
+
+    else if (msg.type === "audio") {
+
+    const audioBuffer =
+        base64ToArrayBuffer(
+            msg.data
+        );
+
+
+    // Pass BOTH the audio and its identity
+    // to the playback system.
+    playChunk(
+        audioBuffer,
+        msg.item_id,
+        msg.content_index
+    );
+        }
+
+    else if (
+        msg.type === "response_started"
+    ) {
+
+        // A NEW Bianca answer is beginning.
+        //
+        // Audio from this response is legitimate,
+        // so allow playback again.
+        biancaInterrupted =
+            false;
+
+
+        if (
+            playCtx
+            && biancaGainNode
+        ) {
+
+            const now =
+                playCtx.currentTime;
+
+
+            // Remove the old fade-to-zero automation.
+            biancaGainNode.gain.cancelScheduledValues(
+                now
+            );
+
+
+            // Return Bianca to normal volume.
+            biancaGainNode.gain.setValueAtTime(
+                1,
+                now
+            );
+
+
+            // Start scheduling new audio from NOW.
+            nextPlayTime =
+                now;
+        }
+    }
+
+    // =================================================
+    // LIVE TRANSCRIPTION
+    // =================================================
+
+    else if (msg.type === "transcript_delta") {
+
+
+        // =============================================
+        // CANDIDATE LIVE TRANSCRIPT
+        // =============================================
+
+        if (msg.speaker === "candidate") {
+
+            // Add newest fragment.
+            liveCandidateText +=
+                msg.text;
+
+
+            // First fragment of this candidate turn?
+            // Create a paragraph.
+            if (!liveCandidateElement) {
+
+                const transcript =
+                    document.getElementById(
+                        "transcript"
+                    );
+
+
+                liveCandidateElement =
+                    document.createElement(
+                        "p"
+                    );
+
+
+                liveCandidateElement.className =
+                    "transcript-live candidate";
+
+
+                transcript.appendChild(
+                    liveCandidateElement
+                );
+            }
+
+
+            // Update SAME paragraph continuously.
+            liveCandidateElement.textContent =
+                `candidate: ${liveCandidateText}`;
+        }
+
+
+        // ---------------------------------------------
+        // KEEP THE NEWEST TEXT VISIBLE
+        // ---------------------------------------------
+
+        const transcript =
+            document.getElementById(
+                "transcript"
+            );
+
+
+        transcript.scrollTop =
+            transcript.scrollHeight;
+    }
+
+
+    // =================================================
+    // FINAL TRANSCRIPT
+    // =================================================
+
+    else if (msg.type === "transcript") {
+
+        const transcript =
+            document.getElementById(
+                "transcript"
+            );
+
+
+        // ---------------------------------------------
+        // FINAL CANDIDATE TRANSCRIPT
+        // ---------------------------------------------
+
+        if (
+            msg.speaker === "candidate"
+            && liveCandidateElement
+        ) {
+
+            // Replace the temporary candidate text
+            // with OpenAI's final completed transcript.
+            liveCandidateElement.textContent =
+                `candidate: ${msg.text}`;
+
+
+            liveCandidateElement.className =
+                "transcript-turn candidate";
+
+
+            // Prepare for the candidate's next answer.
+            liveCandidateText = "";
+            liveCandidateElement = null;
+        }
+
+
+        // ---------------------------------------------
+        // FINAL BIANCA TRANSCRIPT
+        // ---------------------------------------------
+
+        else if (
+            msg.speaker === "interviewer"
+        ) {
+
+            // If this Bianca response was interrupted,
+            // do not start revealing the rest of its
+            // completed transcript.
+            //
+            // The candidate did not hear that remaining part.
+            if (biancaInterrupted) {
+
+                console.log(
+                    "⏭️ Ignoring unheard Bianca transcript tail"
+                );
+
+                return;
+            }
+
+
+            showInterviewerTranscriptWithPlayback(
+                msg.text
+            );
+        }
+
+
+        // ---------------------------------------------
+        // FALLBACK
+        // ---------------------------------------------
+
+        else {
+
+            const turn =
+                document.createElement(
+                    "p"
+                );
+
+
+            turn.className =
+                `transcript-turn ${msg.speaker}`;
+
+
+            turn.textContent =
+                `${msg.speaker}: ${msg.text}`;
+
+
+            transcript.appendChild(
+                turn
+            );
+        }
+
+
+        transcript.scrollTop =
+            transcript.scrollHeight;
+    }
+
+        // This closes:
+        //
+        // ws.onmessage = (event) => {
+        };
+
+
+            // -------------------------------------------------
+            // CONNECTION CLOSED
+            // -------------------------------------------------
+
+            ws.onclose = () => {
+
+                console.log(
+                    "TalentSift WebSocket closed"
+                );
+
+                document.getElementById("status").textContent =
+                    "Disconnected";
+            };
+
+
+
+
+
+            // -------------------------------------------------
+            // CONNECTION ERROR
+            // -------------------------------------------------
+
+            ws.onerror = (error) => {
+
+                console.error(
+                    "WebSocket error:",
+                    error
+                );
+
+                document.getElementById("status").textContent =
+                    "Connection error";
+            };
+
+            // NOW close:
+            // document.getElementById("start").onclick = async () => {
+            };
+
+        // -----------------------------------------------------
+        // FLOAT32 -> PCM16
+        // -----------------------------------------------------
+
+        function floatTo16BitPCM(float32) {
+
+            // Create an Int16 array with the same number
+            // of audio samples.
+            const out =
+                new Int16Array(float32.length);
+
+
+            for (
+                let i = 0;
+                i < float32.length;
+                i++
+            ) {
+
+                // Browser audio should normally already be
+                // between -1 and 1.
+                //
+                // Clamp it anyway so an unexpected value
+                // cannot exceed the PCM16 range.
+                const sample =
+                    Math.max(
+                        -1,
+                        Math.min(
+                            1,
+                            float32[i]
+                        )
+                    );
+
+
+                // PCM16 uses approximately:
+                //
+                // negative side:
+                // -32768
+                //
+                // positive side:
+                // +32767
+                //
+                // So we scale the Float32 sample into
+                // that integer range.
+                out[i] =
+                    sample < 0
+                        ? sample * 32768
+                        : sample * 32767;
+            }
+
+
+            // .buffer gives us the underlying raw bytes.
+            //
+            // This is the binary audio that will eventually
+            // reach the Realtime engine.
+            return out.buffer;
+        }
+
+
+        // -----------------------------------------------------
+        // ARRAYBUFFER -> BASE64
+        // -----------------------------------------------------
+
+        function arrayBufferToBase64(buffer) {
+
+            // ArrayBuffer itself is just raw memory.
+            //
+            // Uint8Array lets us inspect that memory
+            // one BYTE at a time.
+            const bytes =
+                new Uint8Array(buffer);
+
+
+            let binary = "";
+
+
+            // Convert every byte into characters that
+            // JavaScript's btoa() function can encode.
+            for (
+                let i = 0;
+                i < bytes.length;
+                i++
+            ) {
+
+                binary +=
+                    String.fromCharCode(
+                        bytes[i]
+                    );
+            }
+
+
+            // btoa() converts the binary representation
+            // into Base64 TEXT.
+            //
+            // That text can safely live inside JSON.
+            return btoa(binary);
+        }
+
+            // -----------------------------------------------------
+            // BASE64 -> ARRAYBUFFER
+            // -----------------------------------------------------
+            //
+            // FastAPI sends Bianca audio to the browser as
+            // Base64 text.
+            //
+            // Playback needs binary PCM16 bytes again.
+            //
+            // So this reverses:
+            //
+            // Base64 text
+            //      ↓
+            // raw bytes
+            //      ↓
+            // ArrayBuffer
+            function base64ToArrayBuffer(base64) {
+
+                // atob() decodes Base64 into a binary string.
+                const binary =
+                    atob(base64);
+
+
+                // Create enough byte slots to store
+                // everything we just decoded.
+                const bytes =
+                    new Uint8Array(
+                        binary.length
+                    );
+
+
+                // Copy each decoded byte into the array.
+                for (
+                    let i = 0;
+                    i < binary.length;
+                    i++
+                ) {
+
+                    bytes[i] =
+                        binary.charCodeAt(i);
+                }
+
+
+                // Return the raw underlying memory.
+                return bytes.buffer;
+            }
+
+        // -----------------------------------------------------
+        // PLAY ONE BIANCA PCM16 AUDIO CHUNK
+        // -----------------------------------------------------
+
+function playChunk(
+    arrayBuffer,
+    itemId,
+    contentIndex
+) {
+
+    // -------------------------------------------------
+    // CREATE PLAYBACK ENGINE
+    // -------------------------------------------------
+
+    if (!playCtx) {
+
+        playCtx =
+            new AudioContext({
+                sampleRate: SAMPLE_RATE
+            });
+    }
+
+
+    // -------------------------------------------------
+    // CREATE BIANCA VOLUME CONTROL
+    // -------------------------------------------------
+
+    if (!biancaGainNode) {
+
+        biancaGainNode =
+            playCtx.createGain();
+
+
+        biancaGainNode.gain.value =
+            1;
+
+
+        biancaGainNode.connect(
+            playCtx.destination
+        );
+    }
+
+
+    // If this response was already interrupted,
+    // do not schedule more old audio.
+    if (biancaInterrupted) {
+
+        return;
+    }
+
+
+    // -------------------------------------------------
+    // PCM16 -> FLOAT32
+    // -------------------------------------------------
+
+    const pcm16 =
+        new Int16Array(
+            arrayBuffer
+        );
+
+
+    const float32 =
+        new Float32Array(
+            pcm16.length
+        );
+
+
+    for (
+        let i = 0;
+        i < pcm16.length;
+        i++
+    ) {
+
+        float32[i] =
+            pcm16[i] / 32768;
+    }
+
+
+    // -------------------------------------------------
+    // CREATE WEB AUDIO BUFFER
+    // -------------------------------------------------
+
+    const audioBuffer =
+        playCtx.createBuffer(
+            1,
+            float32.length,
+            SAMPLE_RATE
+        );
+
+
+    audioBuffer.copyToChannel(
+        float32,
+        0
+    );
+
+
+    // -------------------------------------------------
+    // CREATE PLAYABLE SOURCE
+    // -------------------------------------------------
+
+    const source =
+        playCtx.createBufferSource();
+
+
+    source.buffer =
+        audioBuffer;
+
+
+    source.connect(
+        biancaGainNode
+    );
+
+
+    activeBiancaSources.add(
+        source
+    );
+
+
+    source.onended = () => {
+
+        activeBiancaSources.delete(
+            source
+        );
+    };
+
+
+    // -------------------------------------------------
+    // DETERMINE WHEN THIS CHUNK WILL PLAY
+    // -------------------------------------------------
+
+    const startTime =
+        Math.max(
+            playCtx.currentTime,
+            nextPlayTime
+        );
+
+
+    // -------------------------------------------------
+    // NEW BIANCA ITEM?
+    // -------------------------------------------------
+
+    // The first audio chunk belonging to a new
+    // assistant item establishes that item's
+    // playback start time.
+    if (
+        currentBiancaItemId !== itemId
+    ) {
+
+        currentBiancaItemId =
+            itemId;
+
+
+        currentBiancaContentIndex =
+            contentIndex ?? 0;
+
+
+        // IMPORTANT:
+        //
+        // Use startTime, NOT playCtx.currentTime.
+        //
+        // Why?
+        //
+        // This audio may be scheduled slightly
+        // into the future behind another chunk.
+        //
+        // startTime represents when the candidate
+        // will actually begin hearing it.
+        biancaPlaybackStartedAt =
+            startTime;
+
+
+        console.log(
+            "▶️ Bianca playback started:",
+            currentBiancaItemId,
+            "at",
+            biancaPlaybackStartedAt
+        );
+    }
+
+
+    // -------------------------------------------------
+    // PLAY THE CHUNK
+    // -------------------------------------------------
+
+    source.start(
+        startTime
+    );
+
+
+    // Work out when THIS chunk finishes.
+    const chunkEndTime =
+        startTime
+        + audioBuffer.duration;
+
+
+    // This becomes the end of everything
+    // currently queued for Bianca.
+    nextPlayTime =
+        chunkEndTime;
+
+
+    biancaScheduledEndAt =
+        chunkEndTime;
 }
 
-let playCtx;
-function playChunk(arrayBuffer) {
-  if (!playCtx) playCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
-  const pcm16 = new Int16Array(arrayBuffer);
- 
-  // TODO #3 — convert Int16 back to Float32 (-1..1): the inverse of TODO #2
-  const float32 = new Float32Array(pcm16.length);
-  // for (let i = 0; i < pcm16.length; i++) { float32[i] = ...; }
-  for (let i = 0; i< pcm16.length; i++) {
-    float32[i] = pcm16[i] / 32768;
-  }
- 
-  const buf = playCtx.createBuffer(1, float32.length, SAMPLE_RATE);
-  buf.copyToChannel(float32, 0);
-  const src = playCtx.createBufferSource();
-  src.buffer = buf;
-  src.connect(playCtx.destination);
-  src.start();   // simple back-to-back playback — good enough for an echo
+
+// -----------------------------------------------------
+// IS BIANCA ACTUALLY STILL SPEAKING?
+// -----------------------------------------------------
+
+function isBiancaPlaybackActive() {
+
+    // No audio system or no known Bianca item?
+    // Then there is nothing to interrupt.
+    if (
+        !playCtx
+        || !currentBiancaItemId
+        || biancaPlaybackStartedAt === null
+        || biancaScheduledEndAt === null
+    ) {
+
+        return false;
+    }
+
+
+    // If the browser audio clock has not yet reached
+    // the scheduled end of Bianca's audio, then some
+    // Bianca audio is still playing or queued.
+    return (
+        playCtx.currentTime
+        < biancaScheduledEndAt
+    );
 }
-</script>
+
+
+// -----------------------------------------------------
+// GRACEFULLY INTERRUPT BIANCA
+// -----------------------------------------------------
+
+function gracefullyInterruptBianca() {
+
+    // -------------------------------------------------
+    // ONLY INTERRUPT IF BIANCA IS ACTUALLY SPEAKING
+    // -------------------------------------------------
+
+    if (
+        !playCtx
+        || !biancaGainNode
+        || !isBiancaPlaybackActive()
+    ) {
+
+        console.log(
+            "🎤 Candidate spoke, but Bianca was not speaking"
+        );
+
+        return;
+    }
+
+
+    console.log(
+        "🤫 Candidate interrupted Bianca"
+    );
+
+    // -------------------------------------------------
+    // 1. REJECT LEFTOVER OLD AUDIO
+    // -------------------------------------------------
+
+    // OpenAI/FastAPI may have already sent some audio
+    // packets that are still travelling through the
+    // network.
+    //
+    // Setting this immediately prevents playChunk()
+    // from scheduling more old Bianca audio.
+    biancaInterrupted = true;
+
+
+    // -------------------------------------------------
+    // 2. FADE THE CURRENT AUDIO DOWN
+    // -------------------------------------------------
+
+    const now =
+        playCtx.currentTime;
+
+
+    const fadeSeconds =
+        INTERRUPT_FADE_MS / 1000;
+
+
+    // Remove any previous volume automation.
+    biancaGainNode.gain.cancelScheduledValues(
+        now
+    );
+
+
+    // Start the fade from the volume Bianca
+    // currently has.
+    biancaGainNode.gain.setValueAtTime(
+        biancaGainNode.gain.value,
+        now
+    );
+
+
+    // Smoothly move volume to zero.
+    //
+    // Example:
+    //
+    // 1.0
+    // 0.8
+    // 0.6
+    // 0.4
+    // 0.2
+    // 0.0
+    //
+    // over roughly 80 milliseconds.
+    biancaGainNode.gain.linearRampToValueAtTime(
+        0,
+        now + fadeSeconds
+    );
+
+
+    // -------------------------------------------------
+    // 3. AFTER THE FADE, REMOVE QUEUED AUDIO
+    // -------------------------------------------------
+
+    setTimeout(
+    () => {
+
+        // -------------------------------------------------
+        // HOW MUCH DID THE CANDIDATE ACTUALLY HEAR?
+        // -------------------------------------------------
+
+        const playedMs =
+            getBiancaPlayedMs();
+
+
+        console.log(
+            "⏱️ Bianca actually heard for:",
+            playedMs,
+            "ms"
+        );
+
+
+        // -------------------------------------------------
+        // STOP ALL OLD BIANCA AUDIO
+        // -------------------------------------------------
+
+        for (
+            const source
+            of activeBiancaSources
+        ) {
+
+            try {
+
+                source.stop();
+
+            } catch (error) {
+
+                // Source may already have ended.
+                // Safe to ignore.
+            }
+        }
+
+
+        activeBiancaSources.clear();
+
+
+        // The old queue is now gone.
+        nextPlayTime =
+            playCtx.currentTime;
+
+
+        // -------------------------------------------------
+        // STOP CAPTION REVEAL
+        // -------------------------------------------------
+
+        if (interviewerCaptionTimer) {
+
+            clearInterval(
+                interviewerCaptionTimer
+            );
+
+
+            interviewerCaptionTimer =
+                null;
+        }
+
+
+        // -------------------------------------------------
+        // REPORT PLAYBACK POSITION TO FASTAPI
+        // -------------------------------------------------
+
+        if (
+            ws
+            && ws.readyState === WebSocket.OPEN
+            && currentBiancaItemId
+        ) {
+
+            ws.send(
+                JSON.stringify({
+                    type:
+                        "playback_interrupted",
+
+                    item_id:
+                        currentBiancaItemId,
+
+                    content_index:
+                        currentBiancaContentIndex,
+
+                    played_ms:
+                        playedMs
+                })
+            );
+
+
+            console.log(
+                "✂️ Truncation report sent:",
+                currentBiancaItemId,
+                playedMs
+            );
+        }
+
+
+        // -------------------------------------------------
+        // RESET LOCAL TRACKING
+        // -------------------------------------------------
+
+        biancaPlaybackStartedAt =
+            null;
+
+
+        biancaScheduledEndAt =
+            null;
+
+    },
+
+    // Give the fade enough time to actually finish.
+    INTERRUPT_FADE_MS + 20
+);
+}
+
+
+    // -----------------------------------------------------
+    // REVEAL BIANCA TRANSCRIPT DURING AUDIO PLAYBACK
+    // -----------------------------------------------------
+
+    function showInterviewerTranscriptWithPlayback(text) {
+
+        const transcript =
+            document.getElementById(
+                "transcript"
+            );
+
+
+        // Create one paragraph for Bianca's current turn.
+        const turn =
+            document.createElement(
+                "p"
+            );
+
+
+        turn.className =
+            "transcript-live interviewer";
+
+
+        transcript.appendChild(
+            turn
+        );
+
+
+        // Split the final transcript into words.
+        //
+        // Example:
+        //
+        // "Tell me about your backend"
+        //
+        // becomes:
+        //
+        // [
+        //   "Tell",
+        //   "me",
+        //   "about",
+        //   "your",
+        //   "backend"
+        // ]
+        const words =
+            text.split(/\s+/);
+
+
+        let wordIndex = 0;
+
+
+        // -------------------------------------------------
+        // HOW MUCH BIANCA AUDIO IS STILL QUEUED?
+        // -------------------------------------------------
+
+        const remainingAudioSeconds =
+            playCtx
+                ? Math.max(
+                    0.1,
+                    nextPlayTime - playCtx.currentTime
+                )
+                : 0.1;
+
+
+        // Convert seconds -> milliseconds.
+        const remainingAudioMs =
+            remainingAudioSeconds * 1000;
+
+
+        // Roughly distribute the remaining words over
+        // Bianca's remaining playback time.
+        const msPerWord =
+            Math.max(
+                40,
+                remainingAudioMs / words.length
+            );
+
+
+        // If an old caption timer somehow still exists,
+        // stop it before beginning another Bianca turn.
+        if (interviewerCaptionTimer) {
+
+            clearInterval(
+                interviewerCaptionTimer
+            );
+        }
+
+
+        interviewerCaptionTimer =
+            setInterval(
+                () => {
+
+                    wordIndex += 1;
+
+
+                    // Show all words up to the current point.
+                    turn.textContent =
+                        `interviewer: ${
+                            words
+                                .slice(
+                                    0,
+                                    wordIndex
+                                )
+                                .join(" ")
+                        }`;
+
+
+                    transcript.scrollTop =
+                        transcript.scrollHeight;
+
+
+                    // Finished revealing the sentence.
+                    if (
+                        wordIndex >= words.length
+                    ) {
+
+                        clearInterval(
+                            interviewerCaptionTimer
+                        );
+
+
+                        interviewerCaptionTimer =
+                            null;
+
+
+                        // Mark this as a completed transcript.
+                        turn.className =
+                            "transcript-turn interviewer";
+                    }
+
+                },
+                msPerWord
+            );
+    }
+
+
+
+
+// -----------------------------------------------------
+// CALCULATE HOW MUCH BIANCA AUDIO WAS ACTUALLY HEARD
+// -----------------------------------------------------
+
+function getBiancaPlayedMs() {
+
+    // If playback never started,
+    // candidate heard nothing.
+    if (
+        !playCtx
+        || biancaPlaybackStartedAt === null
+    ) {
+
+        return 0;
+    }
+
+
+    // playCtx.currentTime tells us where the browser
+    // audio clock is right now.
+    //
+    // But we should never count past the end of
+    // audio that was actually scheduled.
+    const audibleUntil =
+        biancaScheduledEndAt !== null
+            ? Math.min(
+                playCtx.currentTime,
+                biancaScheduledEndAt
+            )
+            : playCtx.currentTime;
+
+
+    // How many seconds elapsed between the first
+    // audible Bianca sample and the last sample
+    // actually reached so far?
+    const playedSeconds =
+        Math.max(
+            0,
+            audibleUntil
+            - biancaPlaybackStartedAt
+        );
+
+
+    // OpenAI's truncate event expects milliseconds.
+    return Math.round(
+        playedSeconds * 1000
+    );
+}
+
+    </script>
+
+</body>
+
+</html>
