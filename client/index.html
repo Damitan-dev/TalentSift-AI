@@ -15,32 +15,748 @@
 
 <body>
 
-    <h1>TalentSift AI</h1>
+    <main>
 
-    <!--
-        Clicking this button will now do TWO things:
+    <!-- ==========================================
+         WELCOME SCREEN
+    =========================================== -->
 
-        1. Connect the browser to FastAPI through WebSocket.
-        2. Ask permission to use the candidate's microphone.
-    -->
-    <button id="start">
-        Start Interview
-    </button>
+    <section
+        id="welcome"
+        class="screen"
+    >
+
+        <h1>
+            TalentSift AI
+        </h1>
+
+        <h2>
+            Your interview is ready
+        </h2>
+
+        <p>
+            Bianca will guide you through your
+            voice interview.
+        </p>
+
+        <p>
+            Find a quiet place where you can answer
+            comfortably.
+        </p>
+
+        <button id="welcome-start">
+            Start
+        </button>
+
+    </section>
 
 
-    <!--
-        We use this to show what state the browser is currently in.
-    -->
-    <p id="status">
-        Not connected
+    <!-- ==========================================
+         CONSENT SCREEN
+    =========================================== -->
+
+    <section
+        id="consent"
+        class="screen"
+        hidden
+    >
+
+        <h2>
+            Before your interview
+        </h2>
+
+        <p>
+            TalentSift uses an AI interviewer to
+            conduct this interview.
+        </p>
+
+        <p>
+            Your voice will be processed to create
+            a transcript, and your responses may be
+            evaluated against job-related criteria.
+        </p>
+
+        <p>
+            TalentSift supports the hiring process.
+            The hiring team makes the final hiring
+            decision.
+        </p>
+
+
+        <label for="language">
+            Interview language
+        </label>
+
+        <select id="language">
+
+            <option value="en">
+                English
+            </option>
+
+            <option value="fr">
+                Français
+            </option>
+
+        </select>
+
+
+        <div>
+
+            <label>
+
+                <input
+                    type="checkbox"
+                    id="consent-checkbox"
+                >
+
+                I have read this notice and consent
+                to continue.
+
+            </label>
+
+        </div>
+
+
+        <p
+            id="consent-error"
+            hidden
+        >
+            Please give your consent before continuing.
+        </p>
+
+
+        <button id="consent-continue">
+            Continue
+        </button>
+
+    </section>
+
+
+    <!-- ==========================================
+         MICROPHONE SCREEN
+    =========================================== -->
+
+    <section
+        id="mic"
+        class="screen"
+        hidden
+    >
+
+        <h2>
+            Check your microphone
+        </h2>
+
+        <p>
+            Your interview session is ready.
+        </p>
+
+        <p>
+            Next, TalentSift needs permission to use
+            your microphone so Bianca can hear you.
+        </p>
+
+        <button id="enable-mic">
+            Enable microphone
+        </button>
+
+
+        <div
+    id="mic-error"
+    hidden
+>
+
+    <p>
+        We couldn't access your microphone.
+        Check your browser microphone permission
+        and try again.
     </p>
 
-    <h2>Transcript</h2>
+    <button id="retry-mic">
+        Try microphone again
+    </button>
 
-    <div id="transcript"></div>
+</div>
+
+    </section>
+
+
+    <!-- ==========================================
+         CONNECTING SCREEN
+    =========================================== -->
+
+    <section
+        id="connecting"
+        class="screen"
+        hidden
+    >
+
+        <h2>
+            Getting things ready…
+        </h2>
+
+        <p>
+            Connecting you to Bianca.
+        </p>
+
+    </section>
+
+
+    <!-- ==========================================
+         INTERVIEW SCREEN
+    =========================================== -->
+
+    <section
+        id="interview"
+        class="screen"
+        hidden
+    >
+
+        <h1>
+            TalentSift Interview
+        </h1>
+
+        <p id="status">
+            Not connected
+        </p>
+
+        <h2>
+            Transcript
+        </h2>
+
+        <div id="transcript"></div>
+
+    </section>
+
+
+    <!-- ==========================================
+         DONE SCREEN
+    =========================================== -->
+
+    <section
+        id="done"
+        class="screen"
+        hidden
+    >
+
+        <h2>
+            Thank you
+        </h2>
+
+        <p>
+            Your interview has been completed.
+        </p>
+
+        <p>
+            The hiring team will review your interview
+            as part of the recruitment process.
+        </p>
+
+        <p>
+            You can now close this page.
+        </p>
+
+    </section>
+
+</main>
 
 
     <script>
+
+
+        // =====================================================
+        // CANDIDATE ONBOARDING STATE MACHINE
+        // =====================================================
+
+        const STATES = [
+            "welcome",
+            "consent",
+            "mic",
+            "connecting",
+            "interview",
+            "done"
+        ];
+
+
+// -----------------------------------------------------
+// ASK CHROME FOR MICROPHONE ACCESS
+// -----------------------------------------------------
+
+async function prepareMicrophone() {
+
+    // Hide any previous microphone error.
+    document.getElementById(
+        "mic-error"
+    ).hidden = true;
+
+
+    try {
+
+        // ---------------------------------------------
+        // 1. ASK THE BROWSER FOR THE MICROPHONE
+        // ---------------------------------------------
+
+        // Where does this come from?
+        //
+        // navigator.mediaDevices is provided by
+        // the browser itself.
+        //
+        // getUserMedia() asks Chrome:
+        //
+        // "Please let TalentSift use the microphone."
+        micStream =
+            await navigator.mediaDevices.getUserMedia({
+                audio: {
+
+                    // Reduce Bianca's speaker audio
+                    // leaking back into the microphone.
+                    echoCancellation: true,
+
+                    // Reduce background noise.
+                    noiseSuppression: true,
+
+                    // Help keep microphone volume usable.
+                    autoGainControl: true
+                }
+            });
+
+
+        console.log(
+            "✅ Microphone permission granted"
+        );
+
+
+        // ---------------------------------------------
+        // 2. CREATE THE AUDIO PROCESSING ENGINE
+        // ---------------------------------------------
+
+        captureCtx =
+            new AudioContext({
+                sampleRate: SAMPLE_RATE
+            });
+
+
+        // Put the real microphone stream into
+        // our browser audio system.
+        micSource =
+            captureCtx.createMediaStreamSource(
+                micStream
+            );
+
+
+        // Break the microphone into small chunks.
+        //
+        // This is the same Week 1 / Monday technique
+        // we already used.
+        micProcessor =
+            captureCtx.createScriptProcessor(
+                1024,
+                1,
+                1
+            );
+
+
+            // ---------------------------------------------
+            // SEND CANDIDATE MICROPHONE AUDIO TO FASTAPI
+            // ---------------------------------------------
+            //
+            // Where does this audio come from?
+            //
+            // Chrome microphone
+            //      ↓
+            // micStream
+            //      ↓
+            // captureCtx
+            //      ↓
+            // micProcessor
+            //
+            // Every time Chrome gives us another small
+            // microphone chunk, this function runs.
+            micProcessor.onaudioprocess = (event) => {
+
+                // Get the candidate's microphone samples.
+                //
+                // Browser audio arrives as Float32 numbers.
+                const float32 =
+                    event.inputBuffer.getChannelData(
+                        0
+                    );
+
+
+                // Convert browser Float32 audio
+                // into PCM16 audio.
+                //
+                // This function already exists lower
+                // down in your index.html.
+                const pcm16 =
+                    floatTo16BitPCM(
+                        float32
+                    );
+
+
+                // Only send if our WebSocket to FastAPI
+                // actually exists AND is open.
+                if (
+                    ws
+                    && ws.readyState === WebSocket.OPEN
+                ) {
+
+                    // Convert binary PCM16 into Base64 text
+                    // so it can travel inside JSON.
+                    const audioBase64 =
+                        arrayBufferToBase64(
+                            pcm16
+                        );
+
+
+                    // Send candidate audio to FastAPI.
+                    ws.send(
+                        JSON.stringify({
+                            type: "audio",
+                            data: audioBase64
+                        })
+                    );
+                }
+            };
+
+        // Connect:
+        //
+        // microphone
+        //      ↓
+        // processor
+        micSource.connect(
+            micProcessor
+        );
+
+
+        // ScriptProcessor must be connected into
+        // the audio graph so Chrome keeps running it.
+        micProcessor.connect(
+            captureCtx.destination
+        );
+
+
+        // ---------------------------------------------
+        // 3. MOVE TO THE NEXT SCREEN
+        // ---------------------------------------------
+
+        show(
+            "connecting"
+        );
+
+
+        console.log(
+            "✅ Microphone ready"
+        );
+
+
+    // We now have:
+//
+// 1. candidate consent
+// 2. a real database session ID
+// 3. microphone permission
+//
+// Now connect this real interview session
+// to FastAPI through WebSocket.
+connectInterviewWebSocket();
+
+    } catch (error) {
+
+        // Candidate denied access, microphone does not
+        // exist, or browser could not open it.
+        console.error(
+            "Microphone setup failed:",
+            error
+        );
+
+
+        // Stay on the mic screen.
+        show(
+            "mic"
+        );
+
+
+        // Show a friendly retry option.
+        document.getElementById(
+            "mic-error"
+        ).hidden = false;
+    }
+}
+
+
+// -----------------------------------------------------
+// MIC SCREEN -> REQUEST MICROPHONE
+// -----------------------------------------------------
+
+document.getElementById(
+    "enable-mic"
+).onclick = prepareMicrophone;
+
+
+
+document.getElementById(
+    "retry-mic"
+).onclick = prepareMicrophone;
+
+
+
+
+function show(state) {
+
+    // Make sure we only use one of our known screens.
+    if (!STATES.includes(state)) {
+
+        console.error(
+            "Unknown TalentSift state:",
+            state
+        );
+
+        return;
+    }
+    // Find every HTML element that has:
+    //
+    // class="screen"
+    const screens =
+        document.querySelectorAll(
+            ".screen"
+        );
+
+
+    // Hide every screen except the one requested.
+    screens.forEach(
+        (screen) => {
+
+            screen.hidden =
+                screen.id !== state;
+        }
+    );
+
+
+    console.log(
+        "TalentSift screen:",
+        state
+    );
+}
+
+  // -----------------------------------------------------
+// WELCOME -> CONSENT
+// -----------------------------------------------------
+
+document.getElementById(
+    "welcome-start"
+).onclick = () => {
+
+    show(
+        "consent"
+    );
+};
+
+
+
+
+
+// -----------------------------------------------------
+// CONSENT -> CREATE SESSION
+// -----------------------------------------------------
+
+document.getElementById(
+    "consent-continue"
+).onclick = async () => {
+
+    // ---------------------------------------------
+    // READ THE CHECKBOX
+    // ---------------------------------------------
+
+    // This value comes directly from the HTML:
+    //
+    // <input id="consent-checkbox">
+    const consentCheckbox =
+        document.getElementById(
+            "consent-checkbox"
+        );
+
+
+    // .checked is:
+    //
+    // true  -> candidate checked it
+    // false -> candidate did not
+    const consentGiven =
+        consentCheckbox.checked;
+
+
+    // ---------------------------------------------
+    // NO CONSENT -> DO NOT CREATE SESSION
+    // ---------------------------------------------
+
+    if (!consentGiven) {
+
+        document.getElementById(
+            "consent-error"
+        ).hidden = false;
+
+
+        return;
+    }
+
+
+    // Candidate has consented.
+    // Hide any old error.
+    document.getElementById(
+        "consent-error"
+    ).hidden = true;
+
+
+    // ---------------------------------------------
+    // READ LANGUAGE PICKER
+    // ---------------------------------------------
+
+    // This comes from:
+    //
+    // <select id="language">
+    //
+    // and will currently be:
+    //
+    // "en"
+    // or
+    // "fr"
+    const language =
+        document.getElementById(
+            "language"
+        ).value;
+
+
+    // ---------------------------------------------
+    // SEND DATA TO FASTAPI
+    // ---------------------------------------------
+
+    try {
+
+        const response =
+            await fetch(
+                "/api/session",
+                {
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+
+                    body: JSON.stringify(
+                        {
+                            // Temporary dev context.
+                            candidate_id:
+                                candidateId,
+
+                            job_id:
+                                jobId,
+
+                            // From candidate's language picker.
+                            language:
+                                language,
+
+                            // From candidate's checkbox.
+                            consent:
+                                consentGiven
+                        }
+                    )
+                }
+            );
+
+
+        // -----------------------------------------
+        // SERVER REJECTED REQUEST
+        // -----------------------------------------
+
+        if (!response.ok) {
+
+            const errorData =
+                await response.json();
+
+
+            console.error(
+                "Session creation failed:",
+                errorData
+            );
+
+
+            document.getElementById(
+                "consent-error"
+            ).textContent =
+                errorData.detail
+                || "We couldn't prepare your interview.";
+
+
+            document.getElementById(
+                "consent-error"
+            ).hidden = false;
+
+
+            return;
+        }
+
+
+        // -----------------------------------------
+        // SERVER CREATED SESSION
+        // -----------------------------------------
+
+        const data =
+            await response.json();
+
+
+        // Where does this come from?
+        //
+        // FastAPI returned:
+        //
+        // {
+        //     "session_id": "...",
+        //     "status": "pending",
+        //     "language": "en"
+        // }
+        //
+        // So this is the REAL database-backed
+        // interview session ID.
+        sessionId =
+            data.session_id;
+
+
+        console.log(
+            "✅ Real interview session created:",
+            sessionId
+        );
+
+
+        // Session exists.
+        // Candidate can now proceed to microphone setup.
+        show(
+            "mic"
+        );
+
+    } catch (error) {
+
+        // This means something such as:
+        //
+        // FastAPI not running
+        // network failure
+        // browser could not reach server
+        console.error(
+            "Could not reach TalentSift server:",
+            error
+        );
+
+
+        document.getElementById(
+            "consent-error"
+        ).textContent =
+            "We couldn't connect to TalentSift. Please try again.";
+
+
+        document.getElementById(
+            "consent-error"
+        ).hidden = false;
+    }
+};
+
+
 
         // -----------------------------------------------------
         // AUDIO CONFIGURATION
@@ -57,6 +773,70 @@
         // live browser <-> FastAPI WebSocket.
         let ws;
 
+
+
+      // -----------------------------------------------------
+    // CURRENT INTERVIEW SESSION
+    // -----------------------------------------------------
+
+    // FastAPI will give us this after the candidate
+    // gives consent and POST /api/session succeeds.
+    //
+    // Later our WebSocket will use:
+    //
+    // /ws/interview/{sessionId}
+        let sessionId = null;
+
+        // -----------------------------------------------------
+// CANDIDATE MICROPHONE STATE
+// -----------------------------------------------------
+
+// The real microphone stream returned by Chrome.
+let micStream = null;
+
+
+// AudioContext used to process the candidate's
+// microphone audio.
+let captureCtx = null;
+
+
+// Connects the microphone stream into AudioContext.
+let micSource = null;
+
+
+// Breaks microphone audio into small chunks.
+//
+// Later this will send those chunks through
+// the WebSocket to FastAPI.
+let micProcessor = null;
+
+
+
+// -----------------------------------------------------
+// DEVELOPMENT-ONLY INTERVIEW CONTEXT
+// -----------------------------------------------------
+//
+// Where did these values come from?
+//
+// candidate ID:
+// This is the Candidate row we already created
+// in data/talentsift.db during our SQLite test.
+//
+// job ID:
+// We are still using a temporary job ID because
+// the invitation/job-link workflow has not been
+// connected yet.
+//
+// LATER:
+// These will come from the candidate's secure
+// interview invitation, NOT hardcoded JavaScript.
+
+const candidateId =
+    "ab61e9f6-6903-4688-ad1f-8a5f737009d6";
+
+
+const jobId =
+    "job-test-001";
 
         // -----------------------------------------------------
         // BIANCA PLAYBACK STATE
@@ -157,200 +937,133 @@
         // Timer currently revealing Bianca's transcript.
         let interviewerCaptionTimer = null;
 
-        // -----------------------------------------------------
-        // START BUTTON
-        // -----------------------------------------------------
+        // =====================================================
+// CONNECT REAL INTERVIEW SESSION TO FASTAPI
+// =====================================================
 
-        document.getElementById("start").onclick = async () => {
+function connectInterviewWebSocket() {
 
-            // -------------------------------------------------
-            // 1. CONNECT TO FASTAPI
-            // -------------------------------------------------
+    // -------------------------------------------------
+    // SAFETY CHECK
+    // -------------------------------------------------
+    //
+    // Where does sessionId come from?
+    //
+    // The candidate checked consent.
+    // Browser called POST /api/session.
+    // FastAPI created a Session in SQLite.
+    // FastAPI returned session_id.
+    // We saved it into:
+    //
+    // let sessionId = ...
+    if (!sessionId) {
 
-            // Create a WebSocket connection from the browser
-            // to our FastAPI application.
-            //
-            // browser-test-001 is only a temporary session ID.
-            ws = new WebSocket(
-                "ws://localhost:8000/ws/interview/browser-test-001"
-            );
+        console.error(
+            "Cannot connect interview: no sessionId"
+        );
 
-
-            // -------------------------------------------------
-            // 2. WHEN FASTAPI ACCEPTS THE CONNECTION
-            // -------------------------------------------------
-
-            ws.onopen = async () => {
-
-                console.log(
-                    "Connected to TalentSift FastAPI server"
-                );
-
-                document.getElementById("status").textContent =
-                    "Connected — requesting microphone";
+        return;
+    }
 
 
-                // ---------------------------------------------
-                // ASK FOR MICROPHONE PERMISSION
-                // ---------------------------------------------
-
-                // navigator.mediaDevices represents browser
-                // access to devices such as the microphone.
-                //
-                // getUserMedia({ audio: true }) means:
-                //
-                // "Browser, please ask the user for permission
-                // to use their microphone."
-                //
-                // await means JavaScript waits here until the
-                // person accepts or rejects the permission.
-                const stream =
-                    await navigator.mediaDevices.getUserMedia({
-                        audio: {
-
-                            // Try to remove Bianca's speaker output
-                            // from the microphone input.
-                            echoCancellation: true,
-
-                            // Reduce steady environmental noise.
-                            noiseSuppression: true,
-
-                            // Let the browser keep candidate volume
-                            // reasonably usable.
-                            autoGainControl: true
-                        }
-                    });
+    // -------------------------------------------------
+    // CHOOSE THE WEBSOCKET PROTOCOL
+    // -------------------------------------------------
+    //
+    // On localhost our page uses:
+    //
+    // http://
+    //
+    // so WebSocket uses:
+    //
+    // ws://
+    //
+    // Later, if the deployed website uses:
+    //
+    // https://
+    //
+    // we use:
+    //
+    // wss://
+    const wsProtocol =
+        window.location.protocol === "https:"
+            ? "wss"
+            : "ws";
 
 
-                console.log(
-                    "Microphone permission granted"
-                );
-
-                document.getElementById("status").textContent =
-                    "Microphone active";
-
-
-                // ---------------------------------------------
-                // CREATE THE BROWSER AUDIO ENGINE
-                // ---------------------------------------------
-
-                // AudioContext is the browser's audio-processing
-                // environment.
-                //
-                // Think of it as the audio workspace where we can
-                // access and transform microphone samples.
-                const ctx = new AudioContext({
-                    sampleRate: SAMPLE_RATE
-                });
-
-
-                // ---------------------------------------------
-                // BRING THE MICROPHONE INTO AudioContext
-                // ---------------------------------------------
-
-                // "stream" is the live microphone.
-                //
-                // createMediaStreamSource() turns that microphone
-                // stream into something AudioContext can process.
-                const source =
-                    ctx.createMediaStreamSource(stream);
+    // -------------------------------------------------
+    // BUILD THE WEBSOCKET URL
+    // -------------------------------------------------
+    //
+    // window.location.host currently comes from
+    // the browser page itself.
+    //
+    // On your machine it should be:
+    //
+    // localhost:8000
+    //
+    // sessionId comes from FastAPI / SQLite.
+    //
+    // So this produces something like:
+    //
+    // ws://localhost:8000/ws/interview/
+    // 8c99a9c6-e704-...
+    const wsUrl =
+        `${wsProtocol}://${window.location.host}`
+        + `/ws/interview/${sessionId}`;
 
 
-                // ---------------------------------------------
-                // PROCESS AUDIO IN SMALL CHUNKS
-                // ---------------------------------------------
-
-                // Instead of waiting for a whole minute of audio,
-                // we process small groups of samples continuously.
-                //
-                // 1024 means each processing callback receives
-                // approximately 1024 audio samples at a time.
-                //
-                // This ScriptProcessor approach comes from our
-                // Week 1 sandbox and is fine for this development
-                // relay test.
-                const processor =
-                    ctx.createScriptProcessor(
-                        1024,
-                        1,
-                        1
-                    );
+    console.log(
+        "Connecting interview WebSocket:",
+        wsUrl
+    );
 
 
-                // ---------------------------------------------
-                // RUN EVERY TIME AN AUDIO CHUNK ARRIVES
-                // ---------------------------------------------
+    // -------------------------------------------------
+    // OPEN THE REAL WEBSOCKET
+    // -------------------------------------------------
 
-                processor.onaudioprocess = (event) => {
-
-                    // The microphone gives browser audio as
-                    // Float32 values approximately between:
-                    //
-                    // -1.0 and +1.0
-                    const float32 =
-                        event.inputBuffer.getChannelData(0);
+    ws =
+        new WebSocket(
+            wsUrl
+        );
 
 
-                    // Convert browser Float32 samples into PCM16.
-                    //
-                    // PCM16 is the integer audio format our
-                    // Realtime pipeline expects.
-                    const pcm16 =
-                        floatTo16BitPCM(float32);
+    // -------------------------------------------------
+    // FASTAPI ACCEPTED THE CONNECTION
+    // -------------------------------------------------
+
+    ws.onopen = () => {
+
+        console.log(
+            "✅ Real interview WebSocket connected:",
+            sessionId
+        );
 
 
-                    // Make sure the WebSocket is actually open
-                    // before trying to send anything.
-                    if (
-                        ws.readyState === WebSocket.OPEN
-                    ) {
-
-                        // Convert our binary PCM16 audio into
-                        // Base64 text.
-                        const audioBase64 =
-                            arrayBufferToBase64(pcm16);
+        document.getElementById(
+            "status"
+        ).textContent =
+            "Connected";
 
 
-                        // Send one JSON MESSAGE to FastAPI.
-                        //
-                        // The important part is:
-                        //
-                        // type = tells FastAPI WHAT this is.
-                        //
-                        // data = contains the actual audio.
-                        ws.send(
-                            JSON.stringify({
-                                type: "audio",
-                                data: audioBase64
-                            })
-                        );
-                    }
-                };
+        // Candidate can now see the actual
+        // interview screen.
+        show(
+            "interview"
+        );
+    };
 
 
-                // ---------------------------------------------
-                // CONNECT THE AUDIO PROCESSING PIPELINE
-                // ---------------------------------------------
-
-                // microphone
-                //     ↓
-                // processor
-                //
-                // This allows processor.onaudioprocess()
-                // to receive microphone samples.
-                source.connect(processor);
-
-
-                // ScriptProcessor needs to be connected into
-                // the AudioContext graph so the browser keeps
-                // processing it.
-                //
-                // We are NOT intentionally playing the microphone
-                // back to the candidate here.
-                processor.connect(
-                    ctx.destination
-                );
-            };
+    // DO NOT CLOSE connectInterviewWebSocket() HERE.
+    //
+    // Your existing:
+    //
+    // ws.onmessage
+    // ws.onclose
+    // ws.onerror
+    //
+    // stay directly below this.
 
 
             // -------------------------------------------------
@@ -406,6 +1119,119 @@
         msg.content_index
     );
         }
+
+
+// -------------------------------------------------
+// OPENAI FINISHED SENDING THE FIXED CLOSING
+// -------------------------------------------------
+
+    else if (
+        msg.type === "closing_generated"
+    ) {
+
+        console.log(
+            "✅ Closing fully received from server"
+        );
+
+
+        // ---------------------------------------------
+        // HOW MUCH BIANCA AUDIO IS STILL QUEUED?
+        // ---------------------------------------------
+        //
+        // nextPlayTime is the browser audio-clock time
+        // at which all currently scheduled Bianca audio
+        // should finish.
+        //
+        // playCtx.currentTime tells us where playback
+        // is right now.
+
+        const remainingSeconds =
+            playCtx
+                ? Math.max(
+                    0,
+                    nextPlayTime - playCtx.currentTime
+                )
+                : 0;
+
+
+        const remainingMs =
+            Math.ceil(
+                remainingSeconds * 1000
+            );
+
+
+        console.log(
+            "⏳ Closing playback remaining:",
+            remainingMs,
+            "ms"
+        );
+
+
+        // Wait until the candidate's browser has reached
+        // the end of the scheduled closing audio.
+        setTimeout(
+            () => {
+
+                if (
+                    ws
+                    && ws.readyState === WebSocket.OPEN
+                ) {
+
+                    ws.send(
+                        JSON.stringify({
+                            type:
+                                "closing_playback_finished"
+                        })
+                    );
+
+
+                    console.log(
+                        "🏁 Browser finished closing playback"
+                    );
+                }
+
+            },
+
+            // Tiny buffer so we do not finish a few
+            // milliseconds before the audio clock.
+            remainingMs + 150
+        );
+    }
+
+
+    // -------------------------------------------------
+    // TALENTSIFT SESSION IS NOW COMPLETED
+    // -------------------------------------------------
+
+    else if (
+        msg.type === "interview_complete"
+    ) {
+
+        console.log(
+            "✅ Interview completed"
+        );
+
+
+        // Stop microphone capture.
+        if (micStream) {
+
+            micStream
+                .getTracks()
+                .forEach(
+                    (track) => {
+                        track.stop();
+                    }
+                );
+        }
+
+
+        // Candidate should not see scores.
+        //
+        // They only see the thank-you / next-steps screen.
+        show(
+            "done"
+        );
+    }
 
     else if (
         msg.type === "response_started"
@@ -647,9 +1473,10 @@
                     "Connection error";
             };
 
-            // NOW close:
-            // document.getElementById("start").onclick = async () => {
-            };
+            // This closes:
+            //
+            // function connectInterviewWebSocket() {
+            }
 
         // -----------------------------------------------------
         // FLOAT32 -> PCM16
@@ -1420,6 +2247,11 @@ function getBiancaPlayedMs() {
         playedSeconds * 1000
     );
 }
+
+// Candidate always begins here.
+show(
+    "welcome"
+);
 
     </script>
 

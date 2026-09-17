@@ -58,17 +58,26 @@ class Job(BaseModel):
 
 
 class Candidate(BaseModel):
-    # Automatically generate a unique candidate ID.
-    id: str = Field(default_factory=lambda: str(uuid4()))
 
-    # Candidate's name is optional because evaluation should not depend on it.
+    id: str = Field(
+        default_factory=lambda: str(uuid4())
+    )
+
+    # Used operationally by recruiters and invitations.
+    #
+    # It should NOT become part of AI scoring.
     full_name: str | None = None
 
-    # Candidate's preferred interview language.
+    # Used to send the candidate their interview link.
+    #
+    # It should also remain outside the scoring input.
+    email: str | None = None
+
     preferred_language: str
 
-    # When this candidate record was created.
-    created_at: datetime = Field(default_factory=utc_now)
+    created_at: datetime = Field(
+        default_factory=utc_now
+    )
 
 
 class TranscriptTurn(BaseModel):
@@ -85,17 +94,23 @@ class TranscriptTurn(BaseModel):
     item_id: str | None = None
 
 
-class Session(BaseModel):
-    # Automatically create a unique interview-session ID.
-    id: str = Field(default_factory=lambda: str(uuid4()))
 
-    # Which job is being interviewed for.
+
+
+class Session(BaseModel):
+
+    # Unique ID for this interview session.
+    id: str = Field(
+        default_factory=lambda: str(uuid4())
+    )
+
+    # Which job this interview belongs to.
     job_id: str
 
     # Which candidate is taking the interview.
     candidate_id: str
 
-    # Current interview state.
+    # Current interview lifecycle state.
     status: Literal[
         "pending",
         "in_progress",
@@ -104,16 +119,44 @@ class Session(BaseModel):
     ] = "pending"
 
     # Language selected for this interview.
+    #
+    # Tuesday currently supports:
+    # en = Eng# Language selected for this interview.
+    #
+    # For Tuesday's browser flow we will normally
+    # store "en" or "fr".
+    #
+    # We keep this as str for now so older sessions
+    # that use values such as "English" still load.lish
+        # fr = French
+
     language: str
 
-    # Consent belongs to this particular interview session.
+    # The interview session must not exist unless
+    # consent was explicitly provided.
     consent_given: bool
 
-    # When the interview began.
-    started_at: datetime = Field(default_factory=utc_now)
+    # When the Session record itself was created.
+    created_at: datetime = Field(
+        default_factory=utc_now
+    )
 
-    # None until the interview has actually ended.
+    # When the candidate gave consent.
+    consented_at: datetime = Field(
+        default_factory=utc_now
+    )
+
+    # None while candidate is still doing onboarding.
+    #
+    # We fill this when the actual interview begins.
+    started_at: datetime | None = None
+
+    # None until the interview has finished.
     ended_at: datetime | None = None
 
-    # Full labelled transcript for this interview.
-    transcript: list[TranscriptTurn] = Field(default_factory=list)
+    # Final transcript turns.
+    #
+    # Do NOT save every live transcription fragment here.
+    transcript: list[TranscriptTurn] = Field(
+        default_factory=list
+    )

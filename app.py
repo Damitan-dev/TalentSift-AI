@@ -5,16 +5,33 @@ from pathlib import Path
 
 import websockets
 
+from models import (
+    Session,
+    TranscriptTurn,
+    utc_now,
+)
+from pydantic import BaseModel
 from dotenv import load_dotenv
 from fastapi import (
     FastAPI,
+    HTTPException,
     WebSocket,
     WebSocketDisconnect,
 )
 from fastapi.staticfiles import StaticFiles
-
+from database import (
+    initialize_database,
+    load_candidate,
+    load_session,
+    save_session,
+    save_transcript_turn,
+)
 
 app = FastAPI()
+
+# Make sure the SQLite tables exist whenever
+# TalentSift starts.
+initialize_database()
 
 
 # ---------------------------------------------------------
@@ -84,11 +101,81 @@ prompt_template = PROMPT_FILE.read_text(
 )
 
 
-INSTRUCTIONS = prompt_template.replace(
-    "{LANGUAGE}",
-    LANGUAGE,
+# ---------------------------------------------------------
+# INTERVIEW FINISHING RULE
+# ---------------------------------------------------------
+
+# This is added to Bianca's normal interviewer prompt.
+#
+# Bianca decides WHEN the interview requirements
+# have been completed.
+#
+# But Bianca does NOT invent the closing.
+# Instead, she calls our finish_interview tool.
+FINISHING_INSTRUCTIONS = """
+When you have completed the interview and there are
+no more substantive interview questions to ask,
+call the finish_interview tool.
+
+Do not create your own closing statement.
+Do not tell the candidate their score or whether
+they passed or failed.
+"""
+
+INSTRUCTIONS = (
+    prompt_template.replace(
+        "{LANGUAGE}",
+        LANGUAGE,
+    )
+    + "\n\n"
+    + FINISHING_INSTRUCTIONS
 )
 
+
+# ---------------------------------------------------------
+# FIXED CLOSING MESSAGES
+# ---------------------------------------------------------
+#
+# These words are owned by TalentSift code,
+# not invented freely by Bianca.
+
+CLOSING_MESSAGES = {
+
+    "en": (
+        "Thank you for your time. "
+        "That concludes your TalentSift interview. "
+        "The hiring team will review your responses "
+        "and contact you about next steps. "
+        "You can now close this page."
+    ),
+
+    "fr": (
+        "Merci pour votre temps. "
+        "Ceci conclut votre entretien TalentSift. "
+        "L'équipe de recrutement examinera vos réponses "
+        "et vous contactera au sujet des prochaines étapes. "
+        "Vous pouvez maintenant fermer cette page."
+    ),
+}
+
+
+class CreateSessionRequest(BaseModel):
+    """
+    Data required to create a new interview session.
+    """
+
+    # The candidate must already exist in our
+    # candidates table.
+    candidate_id: str
+
+    # The job this interview belongs to.
+    job_id: str
+
+    # Candidate's chosen interview language.
+    language: str
+
+    # Candidate must explicitly consent.
+    consent: bool
 
 # ---------------------------------------------------------
 # NORMAL HTTP HEALTH CHECK
@@ -189,10 +276,138 @@ def build_session_config():
             # Same interview instructions used by
             # our existing CLI interview.
             "instructions": INSTRUCTIONS,
+
+            "tools": [
+        {
+            "type": "function",
+            "name": "finish_interview",
+            "description": (
+                "Call this only when all required "
+                "interview questions and necessary "
+                "follow-up questions have been completed "
+                "and the interview should now end."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+        }
+    ],
+
+    "tool_choice": "auto",
+
         },
     }
 
 
+@app.post("/api/session")
+async def create_session(
+    request: CreateSessionRequest
+):
+
+    # -------------------------------------------------
+    # 1. CONSENT IS REQUIRED
+    # -------------------------------------------------
+
+    # Tuesday's rule:
+    #
+    # no consent
+    #     ↓
+    # no Session
+    if not request.consent:
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Consent is required before "
+                "an interview session can be created."
+            ),
+        )
+
+
+    # -------------------------------------------------
+    # 2. CHECK THAT CANDIDATE EXISTS
+    # -------------------------------------------------
+
+    try:
+
+        candidate = load_candidate(
+            request.candidate_id
+        )
+
+    except KeyError:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Candidate not found.",
+        )
+
+
+    # -------------------------------------------------
+    # 3. VALIDATE LANGUAGE
+    # -------------------------------------------------
+
+    # Tuesday currently supports English and French.
+    if request.language not in (
+        "en",
+        "fr",
+    ):
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Language must be 'en' or 'fr'."
+            ),
+        )
+
+
+    # -------------------------------------------------
+    # 4. CREATE THE REAL SESSION
+    # -------------------------------------------------
+
+    session = Session(
+        job_id=request.job_id,
+        candidate_id=candidate.id,
+        status="pending",
+        language=request.language,
+        consent_given=True,
+
+        # started_at remains None.
+        #
+        # Candidate has consented, but the actual
+        # voice interview has not started yet.
+    )
+
+
+    # -------------------------------------------------
+    # 5. SAVE TO SQLITE
+    # -------------------------------------------------
+
+    save_session(
+        session
+    )
+
+
+    print(
+        "✅ Session created:",
+        session.id,
+        "candidate:",
+        candidate.id,
+        "language:",
+        session.language,
+    )
+
+
+    # -------------------------------------------------
+    # 6. RETURN ONLY WHAT BROWSER NEEDS
+    # -------------------------------------------------
+
+    return {
+        "session_id": session.id,
+        "status": session.status,
+        "language": session.language,
+    }
 
 # ---------------------------------------------------------
 # BROWSER <-> TALENTSIFT <-> OPENAI
@@ -210,6 +425,36 @@ async def interview(
     # Chrome requested a WebSocket connection.
     # Accept it.
     await ws_browser.accept()
+
+    # -----------------------------------------------------
+    # MARK THIS INTERVIEW AS STARTED
+    # -----------------------------------------------------
+
+    session = load_session(
+        session_id
+    )
+
+
+    session.status = "in_progress"
+
+
+    if session.started_at is None:
+
+        session.started_at = utc_now()
+
+
+    save_session(
+        session
+    )
+
+
+    print(
+        "▶️ Interview started:",
+        session.id,
+        session.started_at,
+    )
+
+
 
     print(
         f"\n🌐 Browser connected: {session_id}"
@@ -424,6 +669,56 @@ async def interview(
                                     "ms",
                                 )
 
+                        # ============================================
+                        # FIXED CLOSING FINISHED PLAYING
+                        # ============================================
+
+                        elif (
+                            msg_type
+                            == "closing_playback_finished"
+                        ):
+
+                            print(
+                                "🏁 Candidate reached end of closing"
+                            )
+
+
+                            # Load the real Session from SQLite.
+                            completed_session = load_session(
+                                session_id
+                            )
+
+
+                            # Mark the intentional interview completion.
+                            completed_session.status = "completed"
+
+
+                            # Record when the interview finished.
+                            completed_session.ended_at = utc_now()
+
+
+                            # Save the updated Session.
+                            save_session(
+                                completed_session
+                            )
+
+
+                            print(
+                                "✅ Session completed:",
+                                completed_session.id,
+                                completed_session.ended_at,
+                            )
+
+
+                            # Tell the browser it can now move
+                            # to the Done screen.
+                            await ws_browser.send_json(
+                                {
+                                    "type":
+                                        "interview_complete",
+                                }
+                            )
+
                         else:
 
                             print(
@@ -455,14 +750,13 @@ async def interview(
             async def engine_to_browser():
                 """
                 Continuously listen for events from OpenAI.
-
-                For THIS checkpoint we forward:
-                - session status
-                - candidate transcript
-
-                Next checkpoint we add Bianca audio.
                 """
 
+                # -------------------------------------------------
+                # CLOSING RESPONSE STATE
+                # -------------------------------------------------
+                awaiting_closing_response = False          
+                closing_response_id = None          
                 async for raw in ws_engine:
 
                     # OpenAI JSON text
@@ -522,11 +816,221 @@ async def interview(
                         )
 
 
+                        response_data = event.get(
+                            "response",
+                            {},
+                        )
+
+
+                        response_id = response_data.get(
+                            "id"
+                        )
+
+
+                        # -----------------------------------------
+                        # IS THIS THE FIXED CLOSING RESPONSE?
+                        # -----------------------------------------
+
+                        if awaiting_closing_response:
+
+                            closing_response_id = response_id
+
+                            awaiting_closing_response = False
+
+
+                            print(
+                                "🎬 Closing response started:",
+                                closing_response_id,
+                            )
+
+
                         await ws_browser.send_json(
                             {
                                 "type": "response_started",
                             }
                         )
+
+                    # ---------------------------------
+                    # OPENAI FINISHED A RESPONSE
+                    # ---------------------------------
+
+                    elif event_type == "response.done":
+
+                        response_data = event.get(
+                            "response",
+                            {},
+                        )
+
+
+                        response_id = response_data.get(
+                            "id"
+                        )
+
+
+                        # Is this the closing response we saved earlier?
+                        if (
+                            closing_response_id
+                            and response_id == closing_response_id
+                        ):
+
+                            print(
+                                "✅ Closing response fully generated"
+                            )
+
+
+                            # Tell Chrome:
+                            #
+                            # "No more closing audio chunks are coming."
+                            #
+                            # Chrome still needs to finish PLAYING
+                            # the audio already queued locally.
+                            await ws_browser.send_json(
+                                {
+                                    "type":
+                                        "closing_generated",
+                                }
+                            )
+
+
+                    # ---------------------------------
+                    # BIANCA CALLED A TALENTSIFT TOOL
+                    # ---------------------------------
+
+                    elif (
+                        event_type
+                        == "response.output_item.done"
+                    ):
+                        # So first inspect what kind of item it is.
+                        item = event.get(
+                            "item",
+                            {},
+                        )
+
+
+                        # We only care here about function calls.
+                        if (
+                            item.get("type") == "function_call"
+                            and item.get("name") == "finish_interview"
+                        ):
+
+                            print(
+                                "🏁 Bianca requested interview finish"
+                            )
+
+
+                            # -----------------------------------------
+                            # GET THE TOOL CALL ID
+                            # -----------------------------------------
+                            call_id = item.get(
+                                "call_id"
+                            )
+
+
+                            if not call_id:
+
+                                print(
+                                    "❌ finish_interview had no call_id"
+                                )
+
+                                continue
+
+
+                            # -----------------------------------------
+                            # LOAD THE REAL TALENTSIFT SESSION
+                            # -----------------------------------------
+                            # load_session() reads that Session
+                            # from SQLite.
+                            current_session = load_session(
+                                session_id
+                            )
+
+
+                            # -----------------------------------------
+                            # CHOOSE THE FIXED CLOSING
+                            # -----------------------------------------
+
+                            closing_text = CLOSING_MESSAGES.get(
+                                current_session.language,
+                                CLOSING_MESSAGES["en"],
+                            )
+
+
+                            # -----------------------------------------
+                            # RETURN TOOL RESULT TO OPENAI
+                            # -----------------------------------------
+                            #
+                            # Bianca asked:
+                            #
+                            # finish_interview()
+                            #
+                            # Our backend says:
+                            #
+                            # "Accepted. The closing can now happen."
+                            await ws_engine.send(
+                                json.dumps(
+                                    {
+                                        "type":
+                                            "conversation.item.create",
+
+                                        "item": {
+                                            "type":
+                                                "function_call_output",
+
+                                            "call_id":
+                                                call_id,
+
+                                            "output":
+                                                "Interview completion accepted.",
+                                        },
+                                    }
+                                )
+                            )
+
+
+                            # -----------------------------------------
+                            # ASK BIANCA TO READ OUR FIXED CLOSING
+                            # -----------------------------------------
+                            #
+                            # Important:
+                            #
+                            # closing_text came from OUR
+                            # CLOSING_MESSAGES dictionary above.
+                            #
+                            # We are not asking Bianca to invent
+                            # a closing.
+                            awaiting_closing_response = True
+                            await ws_engine.send(
+                                json.dumps(
+                                    {
+                                        "type":
+                                            "response.create",
+
+                                        "response": {
+
+                                            "instructions": (
+                                                "Read the following closing "
+                                                "message exactly as written. "
+                                                "Do not add, remove, or change "
+                                                "any words:\n\n"
+                                                + closing_text
+                                            ),
+
+                                            # Do not allow another tool call
+                                            # during the closing.
+                                            "tools": [],
+
+                                            "tool_choice": "none",
+                                        },
+                                    }
+                                )
+                            )
+
+
+                            print(
+                                "🎬 Fixed TalentSift closing requested"
+                            )
+
+
 
                     elif (
                         event_type
@@ -645,6 +1149,27 @@ async def interview(
                                 interviewer_text,
                             )
 
+                            # ---------------------------------------------
+                            # SAVE FINAL BIANCA TRANSCRIPT TO SQLITE
+                            # ---------------------------------------------
+
+                            interviewer_turn = TranscriptTurn(
+                                speaker="interviewer",
+                                text=interviewer_text,
+                                item_id=event.get("item_id"),
+                            )
+
+
+                            save_transcript_turn(
+                                session_id,
+                                interviewer_turn,
+                            )
+
+
+                            print(
+                                "💾 Saved Bianca transcript turn"
+                            )
+
 
                             # Send the completed interviewer
                             # transcript to Chrome.
@@ -721,6 +1246,27 @@ async def interview(
                             print(
                                 "\n📝 Candidate:",
                                 candidate_text,
+                            )
+
+                            # ---------------------------------------------
+                            # SAVE FINAL CANDIDATE TRANSCRIPT TO SQLITE
+                            # ---------------------------------------------
+
+                            candidate_turn = TranscriptTurn(
+                                speaker="candidate",
+                                text=candidate_text,
+                                item_id=event.get("item_id"),
+                            )
+
+
+                            save_transcript_turn(
+                                session_id,
+                                candidate_turn,
+                            )
+
+
+                            print(
+                                "💾 Saved candidate transcript turn"
                             )
 
 
