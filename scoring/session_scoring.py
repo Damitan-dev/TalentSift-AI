@@ -1,4 +1,5 @@
 from pathlib import Path
+from config import DATA_DIR
 from models import utc_now
 from scoring.engine import EvaluationFailedError, score_transcript
 from scoring.models import Scorecard
@@ -6,12 +7,25 @@ from scoring.rubric import ROLE_RUBRIC
 from storage import SessionRepo
 from scoring.text_normalization import normalize_for_scoring
 from scoring.privacy import redact_candidate_identity
-from storage import SessionRepo
 from database import load_session
 
 class ScorecardRepo:
-    def __init__(self, root: str = "data/scorecards"):
-        self.root = Path(root)
+    def __init__(
+        self,
+        root: str | Path | None = None,
+    ):
+        if root is None:
+
+            self.root = (
+                DATA_DIR
+                / "scorecards"
+            )
+
+        else:
+
+            self.root = Path(
+                root
+            )
         self.root.mkdir(parents=True, exist_ok=True)
 
     def save(self, scorecard) -> Path:

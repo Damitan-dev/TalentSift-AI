@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+        <meta
+        http-equiv="refresh"
+        content="5"
+    >
+
+    <title>
+        TalentSift Fairness Monitoring
+    </title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 32px;
+            background: #f7f7f7;
+            color: #222;
+        }
+
+        .page {
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+
+        .nav {
+            margin-bottom: 24px;
+        }
+
+        .cards {
+            display: grid;
+            grid-template-columns:
+                repeat(
+                    auto-fit,
+                    minmax(180px, 1fr)
+                );
+            gap: 12px;
+            margin: 24px 0 32px;
+        }
+
+        .card {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 18px;
+        }
+
+        .card strong {
+            display: block;
+            font-size: 26px;
+            margin-top: 8px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            margin-bottom: 32px;
+        }
+
+        th,
+        td {
+            border-bottom: 1px solid #ddd;
+            padding: 14px;
+            text-align: left;
+        }
+
+        th {
+            background: #f0f0f0;
+        }
+
+        .notice {
+            background: white;
+            border-left: 4px solid #555;
+            padding: 18px;
+            margin: 24px 0;
+        }
+
+        .muted {
+            color: #666;
+        }
+
+        a {
+            color: inherit;
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="page">
+
+    <div class="nav">
+        <a
+            href="/recruiter/job/{{ job_id }}"
+        >
+            ← Back to recruiter dashboard
+        </a>
+    </div>
+
+
+    <h1>
+        Fairness Monitoring
+    </h1>
+
+
+    <p>
+        Job:
+        <strong>{{ job_id }}</strong>
+    </p>
+
+
+    <p class="muted">
+        Descriptive monitoring of completed
+        TalentSift interviews.
+    </p>
+
+
+    <div class="notice">
+
+        <strong>
+            How to interpret this page
+        </strong>
+
+        <p>
+            These statistics are monitoring signals.
+            A difference between groups does not by
+            itself prove that the interview or scoring
+            system is biased.
+        </p>
+
+        <p>
+            Results should be reviewed alongside sample
+            size, interview evidence, scoring behaviour,
+            and controlled fairness tests.
+        </p>
+
+    </div>
+
+
+    <h2>
+        Evaluation Coverage
+    </h2>
+
+
+    <div class="cards">
+
+        <div class="card">
+            Completed interviews
+
+            <strong>
+                {{ summary.completed_interviews }}
+            </strong>
+        </div>
+
+
+        <div class="card">
+            Scored interviews
+
+            <strong>
+                {{ summary.scored_interviews }}
+            </strong>
+        </div>
+
+
+        <div class="card">
+            Completed without score
+
+            <strong>
+                {{
+                    summary.unscored_completed_interviews
+                }}
+            </strong>
+        </div>
+
+    </div>
+
+
+    <h2>
+        Interview Language Comparison
+    </h2>
+
+
+    <table>
+
+        <thead>
+            <tr>
+                <th>
+                    Interview language
+                </th>
+
+                <th>
+                    Completed
+                </th>
+
+                <th>
+                    Scored
+                </th>
+
+                <th>
+                    Average AI score
+                </th>
+            </tr>
+        </thead>
+
+
+        <tbody>
+
+        {% for row in summary.languages %}
+
+            <tr>
+
+                <td>
+                    {{ row.label }}
+                </td>
+
+                <td>
+                    {{
+                        row.completed_interviews
+                    }}
+                </td>
+
+                <td>
+                    {{
+                        row.scored_interviews
+                    }}
+                </td>
+
+                <td>
+
+                    {% if row.average_score is none %}
+
+                        <span class="muted">
+                            No data yet
+                        </span>
+
+                    {% else %}
+
+                        {{
+                            "%.2f"|format(
+                                row.average_score
+                            )
+                        }}
+
+                    {% endif %}
+
+                </td>
+
+            </tr>
+
+        {% endfor %}
+
+        </tbody>
+
+    </table>
+
+        <h2>
+        Controlled Fairness Testing
+    </h2>
+
+
+    <p class="muted">
+        Controlled development experiments are stored
+        separately from live interview monitoring.
+    </p>
+
+
+    {% if summary.fairness_tests %}
+
+        {% for test in summary.fairness_tests %}
+
+            <div class="notice">
+
+                <strong>
+                    {{ test.title }}
+                </strong>
+
+                <p class="muted">
+                    {{ test.phase }}
+                    ·
+                    {{ test.status | title }}
+                </p>
+
+            </div>
+
+
+            <h3>
+                Controlled setup
+            </h3>
+
+
+            <ul>
+
+                {% for item in test.controlled_setup %}
+
+                    <li>
+                        {{ item }}
+                    </li>
+
+                {% endfor %}
+
+            </ul>
+
+
+            <table>
+
+                <thead>
+
+                    <tr>
+
+                        <th>
+                            {{ test.variable_tested }}
+                        </th>
+
+                        <th>
+                            Transcript observation
+                        </th>
+
+                        <th>
+                            Relevant Experience
+                        </th>
+
+                        <th>
+                            Problem Solving
+                        </th>
+
+                        <th>
+                            Communication
+                        </th>
+
+                        <th>
+                            Overall
+                        </th>
+
+                    </tr>
+
+                </thead>
+
+
+                <tbody>
+
+                    {% for run in test.runs %}
+
+                        <tr>
+
+                            <td>
+                                <strong>
+                                    {{ run.condition }}
+                                </strong>
+                            </td>
+
+                            <td>
+                                {{ run.transcript_observation }}
+                            </td>
+
+                            <td>
+                                {{ run.scores.relevant_experience }}
+                            </td>
+
+                            <td>
+                                {{ run.scores.problem_solving }}
+                            </td>
+
+                            <td>
+                                {{ run.scores.communication }}
+                            </td>
+
+                            <td>
+                                {{
+                                    "%.1f"|format(
+                                        run.scores.overall
+                                    )
+                                }}
+                            </td>
+
+                        </tr>
+
+                    {% endfor %}
+
+                </tbody>
+
+            </table>
+
+
+            <h3>
+                Finding
+            </h3>
+
+
+            <div class="notice">
+
+                <p>
+                    {{ test.finding }}
+                </p>
+
+            </div>
+
+
+            {% if test.remaining_testing %}
+
+                <h3>
+                    Remaining testing
+                </h3>
+
+
+                <ul>
+
+                    {% for item in test.remaining_testing %}
+
+                        <li>
+                            {{ item }}
+                        </li>
+
+                    {% endfor %}
+
+                </ul>
+
+            {% endif %}
+
+
+        {% endfor %}
+
+
+    {% else %}
+
+        <div class="notice">
+
+            <p>
+                No controlled fairness tests
+                have been recorded yet.
+            </p>
+
+        </div>
+
+    {% endif %}
+
+
+    <h2>
+        Current limitations
+    </h2>
+
+
+    <div class="notice">
+
+        <p>
+            This MVP view compares interview language,
+            not protected demographic characteristics.
+        </p>
+
+        <p>
+            Small sample sizes can produce unstable
+            averages. Average-score differences should
+            not be interpreted as causal evidence.
+        </p>
+
+        <p>
+            Recruiter overrides are excluded from the
+            average AI score so that this page measures
+            the AI evaluation output separately from
+            later human decisions.
+        </p>
+
+        <p>
+            Controlled matched-pair testing should be
+            reviewed separately alongside these
+            production monitoring statistics.
+        </p>
+
+    </div>
+
+</div>
+
+</body>
+</html>

@@ -9,6 +9,10 @@ from scoring.session_scoring import (
     ScorecardRepo,
 )
 
+from fairness_storage import (
+    FairnessTestRepo,
+)
+
 
 def build_leaderboard_rows(
     job_id: str,
@@ -523,6 +527,7 @@ def build_job_snapshot(
         "pending": 0,
         "in_progress": 0,
         "completed": 0,
+        "ended_early": 0,
         "failed": 0,
     }
 
@@ -692,6 +697,270 @@ def build_job_snapshot(
         "shortlist_summary":
             shortlist_summary,
     }
+
+
+def build_fairness_summary(
+    job_id: str,
+) -> dict:
+    """
+    Build descriptive fairness-monitoring statistics
+    for one job.
+
+    Current MVP comparison:
+    - English interviews
+    - French interviews
+
+    Important:
+    These statistics are monitoring signals only.
+    They do not prove that the system is fair or biased.
+    """
+
+    # --------------------------------------------------
+    # 1. LOAD COMPLETED INTERVIEWS
+    # --------------------------------------------------
+    #
+    # We only compare completed interviews because
+    # pending, failed, and ended-early interviews do not
+    # represent a finished TalentSift evaluation.
+
+    sessions = list_completed_sessions_for_job(
+        job_id
+    )
+
+
+    scorecard_repo = ScorecardRepo()
+
+
+    # --------------------------------------------------
+    # 2. CREATE LANGUAGE BUCKETS
+    # --------------------------------------------------
+    #
+    # Keep counts separate from scores.
+    #
+    # A completed interview may exist without a
+    # Scorecard, so:
+    #
+    # completed_interviews
+    # and
+    # scored_interviews
+    #
+    # are deliberately different values.
+
+    language_buckets = {
+        "en": {
+            "code": "en",
+            "label": "English",
+            "completed_interviews": 0,
+            "scored_interviews": 0,
+            "score_total": 0.0,
+        },
+
+        "fr": {
+            "code": "fr",
+            "label": "French",
+            "completed_interviews": 0,
+            "scored_interviews": 0,
+            "score_total": 0.0,
+        },
+    }
+
+
+    # --------------------------------------------------
+    # 3. PROCESS EACH COMPLETED INTERVIEW
+    # --------------------------------------------------
+
+    for session in sessions:
+
+        language = session.language
+
+
+        # TalentSift currently supports EN and FR.
+        #
+        # If another language somehow appears in old
+        # or test data, do not crash the fairness page.
+        if language not in language_buckets:
+
+            language_buckets[
+                language
+            ] = {
+                "code": language,
+                "label": language.upper(),
+                "completed_interviews": 0,
+                "scored_interviews": 0,
+                "score_total": 0.0,
+            }
+
+
+        bucket = language_buckets[
+            language
+        ]
+
+
+        bucket[
+            "completed_interviews"
+        ] += 1
+
+
+        # ----------------------------------------------
+        # LOAD AI SCORECARD
+        # ----------------------------------------------
+        #
+        # We use scorecard.overall here.
+        #
+        # We intentionally DO NOT use a recruiter
+        # override because this page is monitoring
+        # AI evaluation behaviour.
+
+        try:
+
+            scorecard = scorecard_repo.load(
+                session.id
+            )
+
+        except FileNotFoundError:
+
+            # Completed interview exists, but there is
+            # currently no score available.
+            #
+            # Do not pretend its score was zero.
+            continue
+
+
+               # A Scorecard file can exist without a usable
+        # overall score.
+        #
+        # For example, there may not have been enough
+        # candidate evidence to score any competency.
+        #
+        # None means "no score available".
+        # It must NOT be converted to 0.
+
+        if scorecard.overall is None:
+
+            continue
+
+
+        bucket[
+            "scored_interviews"
+        ] += 1
+
+
+        bucket[
+            "score_total"
+        ] += scorecard.overall
+
+
+    # --------------------------------------------------
+    # 4. CALCULATE AVERAGES
+    # --------------------------------------------------
+
+    language_rows = []
+
+
+    for bucket in language_buckets.values():
+
+        scored_count = bucket[
+            "scored_interviews"
+        ]
+
+
+        if scored_count == 0:
+
+            # None means:
+            #
+            # "we do not currently have data"
+            #
+            # It must NOT become 0.0 because that would
+            # falsely look like a real candidate score.
+
+            average_score = None
+
+        else:
+
+            average_score = round(
+                bucket[
+                    "score_total"
+                ]
+                / scored_count,
+                2,
+            )
+
+
+        language_rows.append(
+            {
+                "code":
+                    bucket["code"],
+
+                "label":
+                    bucket["label"],
+
+                "completed_interviews":
+                    bucket[
+                        "completed_interviews"
+                    ],
+
+                "scored_interviews":
+                    scored_count,
+
+                "average_score":
+                    average_score,
+            }
+        )
+
+
+    # --------------------------------------------------
+    # 5. OVERALL SUMMARY COUNTS
+    # --------------------------------------------------
+
+    scored_interviews = sum(
+        row["scored_interviews"]
+        for row in language_rows
+    )
+
+
+    # --------------------------------------------------
+    # 5. LOAD CONTROLLED FAIRNESS EXPERIMENTS
+    # --------------------------------------------------
+    #
+    # These are stored separately from production
+    # interview data.
+    #
+    # Every request reloads the JSON file, so newly
+    # recorded experiments can appear without changing
+    # this Python function.
+
+    fairness_test_repo = (
+        FairnessTestRepo()
+    )
+
+
+    fairness_tests = (
+        fairness_test_repo.load_all()
+    )
+
+    return {
+        "job_id":
+            job_id,
+
+        "completed_interviews":
+            len(sessions),
+
+        "scored_interviews":
+            scored_interviews,
+
+        "unscored_completed_interviews":
+            len(sessions)
+            - scored_interviews,
+
+        "languages":
+            language_rows,
+
+        "fairness_tests":
+            fairness_tests,
+
+
+    }
+
 
 
 def build_session_detail(
