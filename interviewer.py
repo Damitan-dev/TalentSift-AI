@@ -403,9 +403,12 @@ async def receive(ws): #For receiving everything the AI sends back
         language=LANGUAGE,
         # Save the language selected for this exact session.
 
-        consent_given=True
+        consent_given=True,
         # TEMPORARY for terminal testing.
         # Later this MUST come from the candidate's actual consent action.
+
+        # CLI interviews begin immediately.
+        started_at=utc_now(),
     )
 
     finishing_interview = False

@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>
+        TalentSift Recruiter Dashboard
+    </title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 32px;
+            background: #f7f7f7;
+            color: #222;
+        }
+
+        h1,
+        h2 {
+            margin-bottom: 12px;
+        }
+
+        .cards {
+            display: grid;
+            grid-template-columns:
+                repeat(4, minmax(140px, 1fr));
+            gap: 12px;
+            margin: 20px 0 30px;
+        }
+
+        .card {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 16px;
+        }
+
+        .card strong {
+            display: block;
+            font-size: 24px;
+            margin-top: 6px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            margin-bottom: 32px;
+        }
+
+        th,
+        td {
+            border-bottom: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+            vertical-align: top;
+        }
+
+        th {
+            background: #f0f0f0;
+        }
+
+        .badge {
+            display: inline-block;
+            border: 1px solid #bbb;
+            border-radius: 999px;
+            padding: 3px 8px;
+            font-size: 12px;
+            margin-right: 4px;
+        }
+
+        .failure {
+            color: #a00000;
+        }
+
+        .muted {
+            color: #666;
+        }
+
+        a {
+            color: inherit;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>
+        Recruiter Dashboard
+    </h1>
+
+    <p>
+        Job:
+        <strong>{{ job_id }}</strong>
+    </p>
+<p class="muted">
+    Dashboard updates automatically every 5 seconds.
+</p>
+
+    <h2>
+        Interview Activity
+    </h2>
+
+    <div class="cards">
+
+        <div class="card">
+            Pending
+            <strong>
+                {{ snapshot.status_counts.pending }}
+            </strong>
+        </div>
+
+        <div class="card">
+            In progress
+            <strong>
+                {{ snapshot.status_counts.in_progress }}
+            </strong>
+        </div>
+
+        <div class="card">
+            Completed
+            <strong>
+                {{ snapshot.status_counts.completed }}
+            </strong>
+        </div>
+
+        <div class="card">
+            Failed
+            <strong>
+                {{ snapshot.status_counts.failed }}
+            </strong>
+        </div>
+
+    </div>
+
+
+    <h2>
+        Interview Status
+    </h2>
+
+    {% if snapshot.interviews %}
+
+        <table>
+
+            <thead>
+                <tr>
+                    <th>Candidate</th>
+                    <th>Status</th>
+                    <th>Evaluation</th>
+                    <th>Language</th>
+                    <th>Started</th>
+                    <th>Failure reason</th>
+                </tr>
+            </thead>
+
+            <tbody>
+
+                {% for interview in snapshot.interviews %}
+
+                    <tr>
+
+                        <td>
+                            {{ interview.candidate_name }}
+                        </td>
+
+                        <td>
+                            {{ interview.status }}
+                        </td>
+
+                        <td>
+
+                            {% if interview.evaluation_status == "ready" %}
+                                Ready
+
+                            {% elif interview.evaluation_status == "awaiting_evaluation" %}
+                                Awaiting evaluation
+
+                            {% else %}
+                                —
+                            {% endif %}
+
+                        </td>
+
+                        <td>
+                            {{ interview.language }}
+                        </td>
+
+                        <td>
+                            {% if interview.started_at %}
+                                {{ interview.started_at }}
+                            {% else %}
+                                —
+                            {% endif %}
+                        </td>
+
+                        <td>
+
+                            {% if interview.failure_reason %}
+
+                                <span class="failure">
+                                    {{ interview.failure_reason }}
+                                </span>
+
+                            {% else %}
+
+                                <span class="muted">
+                                    —
+                                </span>
+
+                            {% endif %}
+
+                        </td>
+
+                    </tr>
+
+                {% endfor %}
+
+            </tbody>
+
+        </table>
+
+    {% else %}
+
+        <p>
+            No interviews for this job yet.
+        </p>
+
+    {% endif %}
+
+
+    <h2>
+        Candidate Ranking
+    </h2>
+
+    {% if snapshot.leaderboard %}
+
+        <table>
+
+            <thead>
+                <tr>
+                    <th>Rank</th>
+                    <th>Candidate</th>
+                    <th>AI score</th>
+                    <th>Effective score</th>
+                    <th>Notes</th>
+                </tr>
+            </thead>
+
+            <tbody>
+
+                {% for row in snapshot.leaderboard %}
+
+                    <tr>
+
+                        <td>
+
+                            {% if row.rank is not none %}
+                                {{ row.rank }}
+                            {% else %}
+                                —
+                            {% endif %}
+
+                        </td>
+
+                        <td>
+
+                            <a
+                                href="/recruiter/session/{{ row.session_id }}"
+                            >
+                                {{ row.candidate_name }}
+                            </a>
+
+                        </td>
+
+                        <td>
+
+                            {% if row.overall is not none %}
+                                {{ row.overall }}
+                            {% else %}
+                                Not available
+                            {% endif %}
+
+                        </td>
+
+                        <td>
+
+                            {% if row.ranking_score is not none %}
+                                {{ row.ranking_score }}
+                            {% else %}
+                                Not available
+                            {% endif %}
+
+                        </td>
+
+                        <td>
+
+                            {% if row.is_tied %}
+
+                                <span class="badge">
+                                    TIED × {{ row.tie_size }}
+                                </span>
+
+                            {% endif %}
+
+
+                            {% if row.overridden %}
+
+                                <span class="badge">
+                                    OVERRIDDEN
+                                </span>
+
+                            {% endif %}
+
+                        </td>
+
+                    </tr>
+
+                {% endfor %}
+
+            </tbody>
+
+        </table>
+
+    {% else %}
+
+        <p>
+            No scored completed interviews yet.
+        </p>
+
+    {% endif %}
+
+
+    {% if snapshot.shortlist_summary.expanded_due_to_tie %}
+
+        <p>
+            Top
+            {{ snapshot.shortlist_summary.requested_limit }}
+            requested, but
+            {{ snapshot.shortlist_summary.selected_count }}
+            candidates are included because
+            {{ snapshot.shortlist_summary.cutoff_tie_size }}
+            candidates share the cutoff score of
+            {{ snapshot.shortlist_summary.cutoff_score }}.
+        </p>
+
+    {% endif %}
+
+    <script>
+    // Recruiter dashboard MVP live refresh.
+    //
+    // Every 5 seconds we reload the page.
+    // Each reload calls build_job_snapshot() again,
+    // so interview statuses and rankings are rebuilt
+    // from the latest database + scorecard data.
+
+    const REFRESH_INTERVAL_MS = 5000;
+
+    setInterval(
+        () => {
+            window.location.reload();
+        },
+        REFRESH_INTERVAL_MS
+    );
+</script>
+</body>
+</html>

@@ -1,11 +1,13 @@
 from pathlib import Path
-
+from models import utc_now
 from scoring.engine import EvaluationFailedError, score_transcript
+from scoring.models import Scorecard
 from scoring.rubric import ROLE_RUBRIC
 from storage import SessionRepo
 from scoring.text_normalization import normalize_for_scoring
 from scoring.privacy import redact_candidate_identity
-
+from storage import SessionRepo
+from database import load_session
 
 class ScorecardRepo:
     def __init__(self, root: str = "data/scorecards"):
@@ -22,6 +24,254 @@ class ScorecardRepo:
 
         return path
 
+    def load(
+        self,
+        session_id: str,
+    ) -> Scorecard:
+        """
+        Load one saved Scorecard using its Session ID.
+        """
+
+        # Scorecards are stored using:
+        #
+        # data/scorecards/<session-id>.json
+        path = (
+            self.root
+            / f"{session_id}.json"
+        )
+
+
+        # Read the saved JSON file as text.
+        json_text = path.read_text(
+            encoding="utf-8"
+        )
+
+
+        # Convert the JSON back into our validated
+        # Pydantic Scorecard model.
+        return Scorecard.model_validate_json(
+            json_text
+        )
+
+
+def apply_recruiter_override(
+    session_id: str,
+    score: float,
+    reason: str,
+    overridden_by: str,
+) -> Scorecard:
+    """
+    Apply an auditable human override to one Scorecard.
+
+    The original AI overall score is preserved.
+    """
+
+    # --------------------------------------------------
+    # 1. BASIC INPUT CHECKS
+    # --------------------------------------------------
+
+    # A reason is required because an unexplained
+    # override would not be auditable.
+    if not reason.strip():
+        raise ValueError(
+            "Recruiter override requires a reason."
+        )
+
+
+    # Until TalentSift has recruiter authentication,
+    # the caller must explicitly tell us who made
+    # the override.
+    if not overridden_by.strip():
+        raise ValueError(
+            "Recruiter override requires overridden_by."
+        )
+
+
+    # --------------------------------------------------
+    # 2. LOAD EXISTING SCORECARD
+    # --------------------------------------------------
+
+    repo = ScorecardRepo()
+
+
+    scorecard = repo.load(
+        session_id
+    )
+
+
+    # --------------------------------------------------
+    # 3. BUILD A NEW VALIDATED SCORECARD
+    # --------------------------------------------------
+    #
+    # IMPORTANT:
+    #
+    # We do NOT change:
+    #
+    # scorecard.overall
+    #
+    # That remains the original AI result.
+    #
+    # Instead we add the recruiter's separate decision.
+
+    updated_data = scorecard.model_dump()
+
+    override_time = utc_now()
+
+
+    history = list(
+        scorecard.override_history
+    )
+
+
+    history.append(
+        {
+            "action": "override",
+            "score": score,
+            "reason": reason.strip(),
+            "actor": overridden_by.strip(),
+            "at": override_time,
+        }
+    )
+
+    updated_data.update(
+        {
+            "recruiter_override": 
+                score,
+
+            "override_reason":
+                reason.strip(),
+
+            "overridden_by":
+                overridden_by.strip(),
+
+            "overridden_at":
+                utc_now(),
+
+            "override_history":
+                history,
+        }
+    )
+
+
+    # Run everything through Scorecard validation again.
+    #
+    # This checks:
+    #
+    # - override score is between 1 and 5
+    # - reason exists
+    # - who exists
+    # - timestamp exists
+    updated_scorecard = Scorecard.model_validate(
+        updated_data
+    )
+
+
+    # --------------------------------------------------
+    # 4. SAVE UPDATED SCORECARD
+    # --------------------------------------------------
+
+    repo.save(
+        updated_scorecard
+    )
+
+
+    return updated_scorecard
+
+def restore_ai_score(
+    session_id: str,
+    reason: str,
+    restored_by: str,
+) -> Scorecard:
+    """
+    Remove the current recruiter override and
+    return the effective ranking score to the
+    original AI overall.
+
+    The previous override remains in audit history.
+    """
+
+    if not reason.strip():
+        raise ValueError(
+            "Restoring the AI score requires a reason."
+        )
+
+
+    if not restored_by.strip():
+        raise ValueError(
+            "Restoring the AI score requires restored_by."
+        )
+
+
+    repo = ScorecardRepo()
+
+
+    scorecard = repo.load(
+        session_id
+    )
+
+
+    if scorecard.recruiter_override is None:
+        raise ValueError(
+            "This Scorecard does not currently have an override."
+        )
+
+
+    restore_time = utc_now()
+
+
+    history = list(
+        scorecard.override_history
+    )
+
+
+    history.append(
+        {
+            "action": "restore_ai",
+            "score": scorecard.overall,
+            "reason": reason.strip(),
+            "actor": restored_by.strip(),
+            "at": restore_time,
+        }
+    )
+
+
+    updated_data = scorecard.model_dump()
+
+
+    updated_data.update(
+        {
+            # Clear ONLY the current override state.
+            #
+            # History remains preserved.
+            "recruiter_override":
+                None,
+
+            "override_reason":
+                None,
+
+            "overridden_by":
+                None,
+
+            "overridden_at":
+                None,
+
+            "override_history":
+                history,
+        }
+    )
+
+
+    updated_scorecard = Scorecard.model_validate(
+        updated_data
+    )
+
+
+    repo.save(
+        updated_scorecard
+    )
+
+
+    return updated_scorecard
 
 def format_scorecard_summary(scorecard) -> str:
     """
@@ -140,17 +390,16 @@ def build_transcripts(session) -> tuple[str, str, str]:
     )
 
 
-def score_saved_session(
-    session_id: str,
-    session_repo: SessionRepo,
-):
+def score_session(session):
     """
-    Load a completed persisted session,
-    construct the required transcript representations,
-    score it, and persist the scorecard.
-    """
+    Score one already-loaded TalentSift Session.
 
-    session = session_repo.load(session_id)
+    This is storage-independent.
+
+    The Session may have come from:
+    - the old JSON SessionRepo
+    - the new SQLite database
+    """
 
     (
         full_transcript,
@@ -158,10 +407,12 @@ def score_saved_session(
         evidence_transcript,
     ) = build_transcripts(session)
 
+
     if not evidence_transcript:
         raise ValueError(
             "Cannot score a session with no candidate transcript."
         )
+
 
     scorecard = score_transcript(
         session_id=session.id,
@@ -170,6 +421,49 @@ def score_saved_session(
         evidence_transcript=evidence_transcript,
     )
 
-    scorecard_path = ScorecardRepo().save(scorecard)
 
-    return scorecard, scorecard_path
+    scorecard_path = ScorecardRepo().save(
+        scorecard
+    )
+
+
+    return (
+        scorecard,
+        scorecard_path,
+    )
+
+def score_saved_session(
+    session_id: str,
+    session_repo: SessionRepo,
+):
+    """
+    Load a Session from the old JSON repository
+    and score it.
+    """
+
+    session = session_repo.load(
+        session_id
+    )
+
+
+    return score_session(
+        session
+    )
+
+
+def score_database_session(
+    session_id: str,
+):
+    """
+    Load a Session from the new SQLite database
+    and score it.
+    """
+
+    session = load_session(
+        session_id
+    )
+
+
+    return score_session(
+        session
+    )

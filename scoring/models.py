@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -93,6 +95,28 @@ class CompetencyScore(BaseModel):
 
         return self
 
+class OverrideEvent(BaseModel):
+    """
+    One auditable recruiter action affecting
+    the effective ranking score.
+    """
+
+    action: Literal[
+        "override",
+        "restore_ai",
+    ]
+
+    score: float | None = Field(
+        default=None,
+        ge=1,
+        le=5,
+    )
+
+    reason: str
+
+    actor: str
+
+    at: datetime
 
 class Scorecard(BaseModel):
     """
@@ -107,6 +131,79 @@ class Scorecard(BaseModel):
     # None means there was not enough assessed competency
     # information to calculate an overall score.
 
+
+    # --------------------------------------------------
+    # RECRUITER OVERRIDE
+    # --------------------------------------------------
+    #
+    # These fields preserve BOTH:
+    #
+    # original AI score
+    #       +
+    # recruiter decision
+    #
+    # We do not overwrite "overall".
+
+    recruiter_override: float | None = Field(
+        default=None,
+        ge=1,
+        le=5,
+    )
+
+
+    override_reason: str | None = None
+
+
+    overridden_by: str | None = None
+
+
+    overridden_at: datetime | None = None
+
+    override_history: list[OverrideEvent] = Field(
+        default_factory=list
+    )
+
+    @model_validator(mode="after")
+    def validate_recruiter_override(self):
+        """
+        An override must be fully auditable.
+
+        If a recruiter override exists, we require:
+        - reason
+        - who made it
+        - when it happened
+        """
+
+        if self.recruiter_override is None:
+
+            return self
+
+
+        if (
+            self.override_reason is None
+            or not self.override_reason.strip()
+        ):
+            raise ValueError(
+                "A recruiter override requires a reason."
+            )
+
+
+        if (
+            self.overridden_by is None
+            or not self.overridden_by.strip()
+        ):
+            raise ValueError(
+                "A recruiter override requires overridden_by."
+            )
+
+
+        if self.overridden_at is None:
+            raise ValueError(
+                "A recruiter override requires overridden_at."
+            )
+
+
+        return self
 
     def compute_overall(
         self,
