@@ -122,12 +122,40 @@ def initialize_database():
 
                 ended_at TEXT,
 
+                failure_reason TEXT,
+
                 FOREIGN KEY(candidate_id)
                     REFERENCES candidates(id)
             )
             """
         )
 
+        # -------------------------------------------------
+        # DATABASE MIGRATION:
+        # add failure_reason to older databases
+        # -------------------------------------------------
+
+        session_columns = connection.execute(
+            """
+            PRAGMA table_info(sessions)
+            """
+        ).fetchall()
+
+
+        session_column_names = {
+            row["name"]
+            for row in session_columns
+        }
+
+
+        if "failure_reason" not in session_column_names:
+
+            connection.execute(
+                """
+                ALTER TABLE sessions
+                ADD COLUMN failure_reason TEXT
+                """
+            )
 
         # -------------------------------------------------
         # TRANSCRIPT TURNS TABLE
@@ -296,9 +324,10 @@ def save_session(session: Session) -> None:
                 created_at,
                 consented_at,
                 started_at,
-                ended_at
+                ended_at,
+                failure_reason
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 
             ON CONFLICT(id) DO UPDATE SET
                 job_id = excluded.job_id,
@@ -309,7 +338,8 @@ def save_session(session: Session) -> None:
                 created_at = excluded.created_at,
                 consented_at = excluded.consented_at,
                 started_at = excluded.started_at,
-                ended_at = excluded.ended_at
+                ended_at = excluded.ended_at,
+                failure_reason = excluded.failure_reason
             """,
             (
                 session.id,
@@ -318,18 +348,12 @@ def save_session(session: Session) -> None:
                 session.status,
                 session.language,
 
-                # SQLite does not have a true Boolean type.
-                #
-                # We store:
-                # False -> 0
-                # True  -> 1
                 int(session.consent_given),
 
                 session.created_at.isoformat(),
 
                 session.consented_at.isoformat(),
 
-                # These two can be None.
                 session.started_at.isoformat()
                 if session.started_at
                 else None,
@@ -337,6 +361,8 @@ def save_session(session: Session) -> None:
                 session.ended_at.isoformat()
                 if session.ended_at
                 else None,
+
+                session.failure_reason,
             ),
         )
 
@@ -372,7 +398,8 @@ def load_session(
                 created_at,
                 consented_at,
                 started_at,
-                ended_at
+                ended_at,
+                failure_reason
             FROM sessions
             WHERE id = ?
             """,
@@ -430,6 +457,9 @@ def load_session(
                 if row["ended_at"]
                 else None
             ),
+            failure_reason=row[
+                "failure_reason"
+            ],
 
             # We have not connected transcript_turns
             # to load_session yet.
@@ -444,6 +474,114 @@ def load_session(
 
         connection.close()
 
+def list_completed_sessions_for_job(
+    job_id: str
+) -> list[Session]:
+    """
+    Load all completed interview Sessions
+    belonging to one job.
+    """
+
+    connection = get_connection()
+
+    try:
+
+        # ---------------------------------------------
+        # FIND THE SESSION IDs
+        # ---------------------------------------------
+        #
+        # Where does job_id come from?
+        #
+        # Later the recruiter URL will be:
+        #
+        # /recruiter/job/{job_id}
+        #
+        # Example:
+        #
+        # /recruiter/job/job-test-001
+        rows = connection.execute(
+            """
+            SELECT id
+            FROM sessions
+            WHERE job_id = ?
+              AND status = 'completed'
+            ORDER BY ended_at DESC
+            """,
+            (
+                job_id,
+            ),
+        ).fetchall()
+
+    finally:
+
+        connection.close()
+
+
+    # ---------------------------------------------
+    # TURN EACH DATABASE ROW INTO A Session MODEL
+    # ---------------------------------------------
+
+    sessions = []
+
+
+    for row in rows:
+
+        session = load_session(
+            row["id"]
+        )
+
+        sessions.append(
+            session
+        )
+
+
+    return sessions
+
+
+def list_sessions_for_job(
+    job_id: str,
+) -> list[Session]:
+    """
+    Load every interview Session for one job,
+    regardless of its current status.
+    """
+
+    connection = get_connection()
+
+    try:
+
+        rows = connection.execute(
+            """
+            SELECT id
+            FROM sessions
+            WHERE job_id = ?
+            ORDER BY created_at DESC
+            """,
+            (
+                job_id,
+            ),
+        ).fetchall()
+
+    finally:
+
+        connection.close()
+
+
+    sessions = []
+
+
+    for row in rows:
+
+        session = load_session(
+            row["id"]
+        )
+
+        sessions.append(
+            session
+        )
+
+
+    return sessions
 
 def save_transcript_turn(
     session_id: str,

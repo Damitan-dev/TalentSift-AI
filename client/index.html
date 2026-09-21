@@ -66,20 +66,34 @@
         </h2>
 
         <p>
-            TalentSift uses an AI interviewer to
-            conduct this interview.
+            TalentSift uses an AI interviewer to conduct
+            this interview.
         </p>
 
         <p>
-            Your voice will be processed to create
-            a transcript, and your responses may be
-            evaluated against job-related criteria.
+            Your voice will be processed during the
+            interview to create a transcript. Your
+            responses may then be evaluated against
+            job-related criteria using AI-assisted
+            assessment.
+        </p>
+
+        <p>
+            Your interview transcript and related
+            interview data will be stored so the hiring
+            team can review the interview.
         </p>
 
         <p>
             TalentSift supports the hiring process.
             The hiring team makes the final hiring
             decision.
+        </p>
+
+        <p>
+            The retention period for interview data is
+            still being finalized for this development
+            version of TalentSift.
         </p>
 
 
@@ -160,6 +174,28 @@
         </button>
 
 
+<div
+    id="mic-picker"
+    hidden
+>
+
+    <p>
+        Choose the microphone you want to use.
+    </p>
+
+    <label for="mic-select">
+        Microphone
+    </label>
+
+    <select id="mic-select">
+    </select>
+
+    <button id="use-selected-mic">
+        Use selected microphone
+    </button>
+
+</div>
+
         <div
     id="mic-error"
     hidden
@@ -212,18 +248,52 @@
     >
 
         <h1>
-            TalentSift Interview
-        </h1>
+    TalentSift Interview
+</h1>
 
-        <p id="status">
-            Not connected
-        </p>
 
-        <h2>
-            Transcript
-        </h2>
+<p id="status">
+    Not connected
+</p>
 
+
+<!-- ==========================================
+     INTERVIEW TIMER
+=========================================== -->
+
+<div id="interview-timer">
+
+    <strong>
+        Interview time
+    </strong>
+
+    <span id="time-remaining">
+        Waiting to start…
+    </span>
+
+</div>
+
+
+<h2>
+    Transcript
+</h2>
         <div id="transcript"></div>
+
+
+                <!-- ==========================================
+             END INTERVIEW
+        =========================================== -->
+
+        <div id="interview-actions">
+
+            <button
+                id="end-interview"
+                type="button"
+            >
+                End interview
+            </button>
+
+        </div>
 
     </section>
 
@@ -257,6 +327,38 @@
 
     </section>
 
+        <!-- ==========================================
+         INTERVIEW ENDED EARLY
+    =========================================== -->
+
+    <section
+        id="ended-early"
+        class="screen"
+        hidden
+    >
+
+        <h2>
+            Interview ended
+        </h2>
+
+        <p>
+            You ended this interview before it was completed.
+        </p>
+
+        <p>
+            Your responses up to this point have been saved.
+        </p>
+
+        <p>
+            The hiring team can review the interview record.
+        </p>
+
+        <p>
+            You can now close this page.
+        </p>
+
+    </section>
+
 </main>
 
 
@@ -273,9 +375,168 @@
             "mic",
             "connecting",
             "interview",
-            "done"
+            "done",
+            "ended-early"
         ];
 
+
+async function loadMicrophones() {
+
+    // Hide any previous microphone error.
+    document.getElementById(
+        "mic-error"
+    ).hidden = true;
+
+
+    try {
+
+        // ---------------------------------------------
+        // ASK FOR PERMISSION FIRST
+        // ---------------------------------------------
+        //
+        // Chrome normally hides microphone names until
+        // the user gives permission.
+        //
+        // We temporarily open the default microphone
+        // only so Chrome will reveal the real devices.
+
+        const permissionStream =
+            await navigator.mediaDevices.getUserMedia({
+                audio: true
+            });
+
+
+        // ---------------------------------------------
+        // FIND AVAILABLE MICROPHONES
+        // ---------------------------------------------
+
+        const audioDevices =
+            await navigator.mediaDevices.enumerateDevices();
+
+
+        const allMicrophones =
+            audioDevices.filter(
+                device =>
+                    device.kind === "audioinput"
+            );
+
+
+        // Windows may also give us special aliases:
+        //
+        // "Default - ..."
+        // "Communications - ..."
+        //
+        // These can duplicate the physical microphones,
+        // so prefer the actual devices.
+
+        const physicalMicrophones =
+            allMicrophones.filter(
+                device =>
+                    device.deviceId !== "default"
+                    &&
+                    device.deviceId !== "communications"
+            );
+
+
+        const microphones =
+            physicalMicrophones.length > 0
+                ? physicalMicrophones
+                : allMicrophones;
+
+
+        console.log(
+            "🎤 Available microphones:"
+        );
+
+
+        for (const microphone of microphones) {
+
+            console.log(
+                microphone.label,
+                microphone.deviceId
+            );
+        }
+
+
+        // ---------------------------------------------
+        // WE ONLY NEEDED THIS STREAM FOR PERMISSION
+        // ---------------------------------------------
+
+        permissionStream
+            .getTracks()
+            .forEach(
+                track => track.stop()
+            );
+
+
+        // ---------------------------------------------
+        // PUT MICROPHONES INTO THE DROPDOWN
+        // ---------------------------------------------
+
+        const micSelect =
+            document.getElementById(
+                "mic-select"
+            );
+
+
+        micSelect.innerHTML = "";
+
+
+        microphones.forEach(
+            (microphone, index) => {
+
+                const option =
+                    document.createElement(
+                        "option"
+                    );
+
+
+                option.value =
+                    microphone.deviceId;
+
+
+                option.textContent =
+                    microphone.label
+                    ||
+                    `Microphone ${index + 1}`;
+
+
+                micSelect.appendChild(
+                    option
+                );
+            }
+        );
+
+
+        // Show the picker.
+        document.getElementById(
+            "mic-picker"
+        ).hidden = false;
+
+
+        // We no longer need the permission button.
+        document.getElementById(
+            "enable-mic"
+        ).hidden = true;
+
+
+        console.log(
+            "✅ Microphone list ready"
+        );
+
+    } catch (error) {
+
+        console.error(
+            "Microphone permission failed:",
+            error
+        );
+
+
+        document.getElementById(
+            "mic-error"
+        ).hidden = false;
+    }
+}
 
 // -----------------------------------------------------
 // ASK CHROME FOR MICROPHONE ACCESS
@@ -303,23 +564,51 @@ async function prepareMicrophone() {
         // getUserMedia() asks Chrome:
         //
         // "Please let TalentSift use the microphone."
-        micStream =
-            await navigator.mediaDevices.getUserMedia({
-                audio: {
-
-                    // Reduce Bianca's speaker audio
-                    // leaking back into the microphone.
-                    echoCancellation: true,
-
-                    // Reduce background noise.
-                    noiseSuppression: true,
-
-                    // Help keep microphone volume usable.
-                    autoGainControl: true
-                }
-            });
+      const selectedDeviceId =
+    document.getElementById(
+        "mic-select"
+    ).value;
 
 
+if (!selectedDeviceId) {
+
+    throw new Error(
+        "No microphone was selected."
+    );
+}
+
+
+micStream =
+    await navigator.mediaDevices.getUserMedia({
+        audio: {
+
+            // Use the microphone chosen by
+            // the candidate from the dropdown.
+            deviceId: {
+                exact: selectedDeviceId
+            },
+
+            echoCancellation: true,
+
+            noiseSuppression: true,
+
+            autoGainControl: true
+        }
+    });
+            
+            const selectedMicTrack =
+    micStream.getAudioTracks()[0];
+
+        console.log(
+            "🎙️ Selected microphone:",
+            selectedMicTrack.label
+        );
+
+        console.log(
+            "🎛️ Microphone settings:",
+            selectedMicTrack.getSettings()
+        );
+        
         console.log(
             "✅ Microphone permission granted"
         );
@@ -334,6 +623,10 @@ async function prepareMicrophone() {
                 sampleRate: SAMPLE_RATE
             });
 
+            console.log(
+                "🎚️ Capture AudioContext sample rate:",
+                captureCtx.sampleRate
+            );
 
         // Put the real microphone stream into
         // our browser audio system.
@@ -489,16 +782,110 @@ connectInterviewWebSocket();
 
 document.getElementById(
     "enable-mic"
-).onclick = prepareMicrophone;
+).onclick = loadMicrophones;
 
+
+document.getElementById(
+    "use-selected-mic"
+).onclick = prepareMicrophone;
 
 
 document.getElementById(
     "retry-mic"
-).onclick = prepareMicrophone;
+).onclick = loadMicrophones;
+
+// -----------------------------------------------------
+// CANDIDATE -> END INTERVIEW EARLY
+// -----------------------------------------------------
+
+document.getElementById(
+    "end-interview"
+).onclick = () => {
+
+    // Prevent double-clicks from sending the request twice.
+    if (interviewEndedEarly) {
+
+        return;
+    }
 
 
+    const confirmed =
+        window.confirm(
+            "End this interview now?\n\n"
+            + "Your responses so far will be saved, "
+            + "but the interview will be marked as "
+            + "ended early."
+        );
 
+
+    if (!confirmed) {
+
+        return;
+    }
+
+
+    // Mark this immediately so the browser stops
+    // behaving like the interview is still active.
+    interviewEndedEarly =
+        true;
+
+
+    // Stop the visible countdown.
+    stopInterviewCountdown();
+
+
+    // Disable the button while the backend saves
+    // the ended_early state.
+    const endButton =
+        document.getElementById(
+            "end-interview"
+        );
+
+
+    endButton.disabled =
+        true;
+
+
+    document.getElementById(
+        "status"
+    ).textContent =
+        "Ending interview…";
+
+
+    // Stop sending new microphone audio.
+    if (micStream) {
+
+        micStream
+            .getTracks()
+            .forEach(
+                (track) => {
+
+                    track.stop();
+                }
+            );
+    }
+
+
+    // Tell FastAPI that this was an intentional
+    // candidate early exit.
+    if (
+        ws
+        && ws.readyState === WebSocket.OPEN
+    ) {
+
+        ws.send(
+            JSON.stringify({
+                type:
+                    "end_interview"
+            })
+        );
+
+
+        console.log(
+            "🛑 End interview request sent"
+        );
+    }
+};
 
 function show(state) {
 
@@ -901,12 +1288,17 @@ const jobId =
         let biancaGainNode = null;
 
 
-        // Keep references to Bianca audio sources that are
-        // currently playing OR scheduled to play.
+        // Each playing/scheduled source is associated
+        // with the Bianca item that created it.
         //
-        // We need these references so an interruption can
-        // cancel the remaining queued audio.
+        // source -> itemId
         const activeBiancaSources =
+            new Map();
+
+
+        // Once a Bianca item is interrupted,
+        // reject any late audio packets belonging to it.
+        const interruptedBiancaItemIds =
             new Set();
 
 
@@ -929,6 +1321,150 @@ const jobId =
         // Holds the HTML element currently showing
         // the candidate's unfinished turn.
         let liveCandidateElement = null;
+
+        // Tracks which OpenAI candidate speech item
+        // the current live transcript paragraph belongs to.
+        let liveCandidateItemId = null;
+
+
+        // -----------------------------------------------------
+        // INTERVIEW TIMER STATE
+        // -----------------------------------------------------
+
+        let interviewTimerInterval = null;
+
+        let interviewSecondsRemaining = 0;
+
+        // True once the candidate intentionally
+        // ends the interview early.
+        let interviewEndedEarly = false;
+
+
+
+        function formatInterviewTime(
+            totalSeconds
+        ) {
+
+            const safeSeconds =
+                Math.max(
+                    0,
+                    totalSeconds
+                );
+
+
+            const minutes =
+                Math.floor(
+                    safeSeconds / 60
+                );
+
+
+            const seconds =
+                safeSeconds % 60;
+
+
+            return (
+                String(minutes)
+                + ":"
+                + String(seconds).padStart(
+                    2,
+                    "0"
+                )
+                + " remaining"
+            );
+        }
+
+
+        function updateInterviewTimerDisplay() {
+
+            const timerElement =
+                document.getElementById(
+                    "time-remaining"
+                );
+
+
+            if (!timerElement) {
+
+                return;
+            }
+
+
+            timerElement.textContent =
+                formatInterviewTime(
+                    interviewSecondsRemaining
+                );
+        }
+
+
+        function startInterviewCountdown(
+            totalSeconds
+        ) {
+
+            // Stop an old interval if one somehow exists.
+            if (interviewTimerInterval) {
+
+                clearInterval(
+                    interviewTimerInterval
+                );
+
+                interviewTimerInterval =
+                    null;
+            }
+
+
+            interviewSecondsRemaining =
+                totalSeconds;
+
+
+            updateInterviewTimerDisplay();
+
+
+            interviewTimerInterval =
+                setInterval(
+                    () => {
+
+                        interviewSecondsRemaining =
+                            Math.max(
+                                0,
+                                interviewSecondsRemaining - 1
+                            );
+
+
+                        updateInterviewTimerDisplay();
+
+
+                        if (
+                            interviewSecondsRemaining
+                            <= 0
+                        ) {
+
+                            clearInterval(
+                                interviewTimerInterval
+                            );
+
+
+                            interviewTimerInterval =
+                                null;
+                        }
+
+                    },
+                    1000
+                );
+        }
+
+
+        function stopInterviewCountdown() {
+
+            if (interviewTimerInterval) {
+
+                clearInterval(
+                    interviewTimerInterval
+                );
+
+
+                interviewTimerInterval =
+                    null;
+            }
+        }
 
         // -----------------------------------------------------
         // BIANCA CAPTION STATE
@@ -1089,6 +1625,103 @@ function connectInterviewWebSocket() {
             msg.value;
     }
 
+
+// -------------------------------------------------
+    // INTERVIEW TIMER STARTED
+    // -------------------------------------------------
+
+    else if (
+        msg.type
+        === "interview_timer_started"
+    ) {
+
+        console.log(
+            "⏱️ Interview timer started:",
+            msg.total_seconds,
+            "seconds"
+        );
+
+
+        startInterviewCountdown(
+            msg.total_seconds
+        );
+    }
+
+
+    // -------------------------------------------------
+    // INTERVIEW TIME WARNING
+    // -------------------------------------------------
+
+    else if (
+        msg.type
+        === "time_warning"
+    ) {
+
+        console.log(
+            "⏳ Interview time warning:",
+            msg.remaining_seconds,
+            "seconds remaining"
+        );
+
+
+        const timerElement =
+            document.getElementById(
+                "time-remaining"
+            );
+
+
+        if (timerElement) {
+
+            timerElement.textContent =
+                formatInterviewTime(
+                    msg.remaining_seconds
+                );
+        }
+    }
+
+
+    // -------------------------------------------------
+    // INTERVIEW TIME LIMIT REACHED
+    // -------------------------------------------------
+
+    else if (
+        msg.type
+        === "time_limit_reached"
+    ) {
+
+        console.log(
+            "⏰ Interview time limit reached"
+        );
+
+
+        stopInterviewCountdown();
+
+
+        interviewSecondsRemaining =
+            0;
+
+
+        const timerElement =
+            document.getElementById(
+                "time-remaining"
+            );
+
+
+        if (timerElement) {
+
+            timerElement.textContent =
+                "Interview time complete";
+        }
+
+
+        document.getElementById(
+            "status"
+        ).textContent =
+            "Finishing interview…";
+    }
+
+
+
     // -------------------------------------------------
     // CANDIDATE INTERRUPTED BIANCA
     // -------------------------------------------------
@@ -1120,6 +1753,79 @@ function connectInterviewWebSocket() {
     );
         }
 
+
+    else if (
+    msg.type === "opening_generated"
+        ) {
+
+            console.log(
+                "✅ Opening fully received from server"
+            );
+
+
+            // How much of Bianca's opening is still
+            // waiting in the browser playback queue?
+            const remainingSeconds =
+                playCtx
+                    ? Math.max(
+                        0,
+                        nextPlayTime
+                        - playCtx.currentTime
+                    )
+                    : 0;
+
+
+            const remainingMs =
+                Math.ceil(
+                    remainingSeconds * 1000
+                );
+
+
+            console.log(
+                "⏳ Opening playback remaining:",
+                remainingMs,
+                "ms"
+            );
+
+
+            setTimeout(
+                () => {
+
+                        // Candidate may have ended the interview
+                        // while the opening was still playing.
+                        if (interviewEndedEarly) {
+
+                            console.log(
+                                "⏭️ Opening finish ignored "
+                                + "because interview ended early"
+                            );
+
+                            return;
+                        }
+
+                    if (
+                        ws
+                        && ws.readyState
+                            === WebSocket.OPEN
+                    ) {
+
+                        ws.send(
+                            JSON.stringify({
+                                type:
+                                    "opening_playback_finished"
+                            })
+                        );
+
+
+                        console.log(
+                            "🎙️ Candidate audio now enabled"
+                        );
+                    }
+                },
+
+                remainingMs + 100
+            );
+        }
 
 // -------------------------------------------------
 // OPENAI FINISHED SENDING THE FIXED CLOSING
@@ -1211,6 +1917,12 @@ function connectInterviewWebSocket() {
             "✅ Interview completed"
         );
 
+        // Stop the visible interview clock.
+        stopInterviewCountdown();
+
+
+        interviewSecondsRemaining =
+            0;
 
         // Stop microphone capture.
         if (micStream) {
@@ -1233,45 +1945,143 @@ function connectInterviewWebSocket() {
         );
     }
 
+    // -------------------------------------------------
+    // CANDIDATE ENDED INTERVIEW EARLY
+    // -------------------------------------------------
+
     else if (
-        msg.type === "response_started"
+        msg.type === "interview_ended_early"
     ) {
 
-        // A NEW Bianca answer is beginning.
+        console.log(
+            "🛑 Interview ended early"
+        );
+
+
+        // ---------------------------------------------
+        // STOP THE INTERVIEW CLOCK
+        // ---------------------------------------------
+
+        stopInterviewCountdown();
+
+
+        interviewSecondsRemaining =
+            0;
+
+
+        // ---------------------------------------------
+        // STOP MICROPHONE CAPTURE
+        // ---------------------------------------------
+
+        if (micStream) {
+
+            micStream
+                .getTracks()
+                .forEach(
+                    (track) => {
+
+                        track.stop();
+                    }
+                );
+        }
+
+
+        // ---------------------------------------------
+        // STOP ANY BIANCA AUDIO STILL PLAYING
+        // ---------------------------------------------
         //
-        // Audio from this response is legitimate,
-        // so allow playback again.
-        biancaInterrupted =
-            false;
+        // At this point the candidate intentionally
+        // ended the interview, so no remaining Bianca
+        // audio should continue playing.
 
-
-        if (
-            playCtx
-            && biancaGainNode
+        for (
+            const source
+            of activeBiancaSources.keys()
         ) {
 
-            const now =
-                playCtx.currentTime;
+            try {
+
+                source.stop();
+
+            } catch (error) {
+
+                // Source may already have ended.
+            }
+        }
 
 
-            // Remove the old fade-to-zero automation.
-            biancaGainNode.gain.cancelScheduledValues(
-                now
-            );
+        activeBiancaSources.clear();
 
 
-            // Return Bianca to normal volume.
-            biancaGainNode.gain.setValueAtTime(
-                1,
-                now
-            );
+        if (playCtx) {
 
-
-            // Start scheduling new audio from NOW.
             nextPlayTime =
-                now;
+                playCtx.currentTime;
+        }
+
+
+        biancaPlaybackStartedAt =
+            null;
+
+
+        biancaScheduledEndAt =
+            null;
+
+
+        // Stop any transcript reveal that belongs
+        // to Bianca's unfinished response.
+        if (interviewerCaptionTimer) {
+
+            clearInterval(
+                interviewerCaptionTimer
+            );
+
+
+            interviewerCaptionTimer =
+                null;
+        }
+
+
+        // ---------------------------------------------
+        // SHOW THE EARLY-EXIT SCREEN
+        // ---------------------------------------------
+
+        show(
+            "ended-early"
+        );
+
+                // This interview is intentionally over.
+        //
+        // Closing the socket prevents any delayed
+        // interview messages from reviving the session.
+        if (
+            ws
+            && ws.readyState === WebSocket.OPEN
+        ) {
+
+            ws.close(
+                1000,
+                "Interview ended early"
+            );
         }
     }
+
+    else if (
+            msg.type === "response_started"
+        ) {
+
+            // Do not change the audio queue here.
+            //
+            // response_started does not tell us which
+            // Bianca item the browser is about to receive.
+            //
+            // playChunk() has the real item_id, so playback
+            // state will be changed there instead.
+
+            console.log(
+                "🤖 New Bianca response announced"
+            );
+        }
 
     // =================================================
     // LIVE TRANSCRIPTION
@@ -1286,42 +2096,84 @@ function connectInterviewWebSocket() {
 
         if (msg.speaker === "candidate") {
 
-            // Add newest fragment.
-            liveCandidateText +=
-                msg.text;
+    // ---------------------------------------------
+    // DETECT A NEW CANDIDATE SPEECH TURN
+    // ---------------------------------------------
+    //
+    // Every OpenAI candidate speech item has its
+    // own item_id.
+    //
+    // If the incoming fragment belongs to a different
+    // item, it must NOT continue inside the previous
+    // candidate answer paragraph.
+
+    if (
+        msg.item_id &&
+        msg.item_id !== liveCandidateItemId
+    ) {
+
+        // We have started a different candidate turn.
+        liveCandidateItemId =
+            msg.item_id;
+
+        liveCandidateText =
+            "";
+
+        liveCandidateElement =
+            null;
+    }
 
 
-            // First fragment of this candidate turn?
-            // Create a paragraph.
-            if (!liveCandidateElement) {
+    // ---------------------------------------------
+    // ADD THIS TURN'S NEWEST TEXT FRAGMENT
+    // ---------------------------------------------
 
-                const transcript =
-                    document.getElementById(
-                        "transcript"
-                    );
+    liveCandidateText +=
+        msg.text;
 
 
-                liveCandidateElement =
-                    document.createElement(
-                        "p"
-                    );
+    // ---------------------------------------------
+    // CREATE ONE PARAGRAPH FOR THIS TURN
+    // ---------------------------------------------
+
+    if (!liveCandidateElement) {
+
+        const transcript =
+            document.getElementById(
+                "transcript"
+            );
 
 
-                liveCandidateElement.className =
-                    "transcript-live candidate";
+        liveCandidateElement =
+            document.createElement(
+                "p"
+            );
 
 
-                transcript.appendChild(
-                    liveCandidateElement
-                );
-            }
+        liveCandidateElement.className =
+            "transcript-live candidate";
 
 
-            // Update SAME paragraph continuously.
-            liveCandidateElement.textContent =
-                `candidate: ${liveCandidateText}`;
+        // Keep the OpenAI item ID on the HTML element
+        // as well. This will help us finalize the
+        // correct paragraph later.
+        if (msg.item_id) {
+
+            liveCandidateElement.dataset.itemId =
+                msg.item_id;
         }
 
+
+        transcript.appendChild(
+            liveCandidateElement
+        );
+    }
+
+
+    // Update only THIS candidate turn's paragraph.
+    liveCandidateElement.textContent =
+        `candidate: ${liveCandidateText}`;
+    }
 
         // ---------------------------------------------
         // KEEP THE NEWEST TEXT VISIBLE
@@ -1354,26 +2206,132 @@ function connectInterviewWebSocket() {
         // FINAL CANDIDATE TRANSCRIPT
         // ---------------------------------------------
 
-        if (
-            msg.speaker === "candidate"
-            && liveCandidateElement
-        ) {
+        if (msg.speaker === "candidate") {
 
-            // Replace the temporary candidate text
-            // with OpenAI's final completed transcript.
-            liveCandidateElement.textContent =
-                `candidate: ${msg.text}`;
+            const transcript =
+                document.getElementById(
+                    "transcript"
+                );
 
 
-            liveCandidateElement.className =
-                "transcript-turn candidate";
+            // ---------------------------------------------
+            // FIND THE EXACT CANDIDATE TURN
+            // ---------------------------------------------
+            //
+            // A completed transcription may arrive later
+            // than expected.
+            //
+            // Therefore we must finalize the paragraph that
+            // has the SAME OpenAI item_id, not simply the
+            // most recently created candidate paragraph.
+
+            let candidateElement = null;
 
 
-            // Prepare for the candidate's next answer.
-            liveCandidateText = "";
-            liveCandidateElement = null;
+            if (msg.item_id) {
+
+                const candidateElements =
+                    transcript.querySelectorAll(
+                        ".candidate[data-item-id]"
+                    );
+
+
+                for (
+                    const element
+                    of candidateElements
+                ) {
+
+                    if (
+                        element.dataset.itemId
+                        === msg.item_id
+                    ) {
+
+                        candidateElement =
+                            element;
+
+                        break;
+                    }
+                }
+            }
+
+
+            // ---------------------------------------------
+            // FINALIZE THE MATCHING LIVE PARAGRAPH
+            // ---------------------------------------------
+
+            if (candidateElement) {
+
+                candidateElement.textContent =
+                    `candidate: ${msg.text}`;
+
+
+                candidateElement.className =
+                    "transcript-turn candidate";
+            }
+
+
+            // ---------------------------------------------
+            // NO LIVE DELTA PARAGRAPH?
+            // ---------------------------------------------
+            //
+            // Sometimes the final transcript can arrive
+            // without us having displayed useful deltas.
+            //
+            // We still need to show the candidate's turn.
+
+            else {
+
+                candidateElement =
+                    document.createElement(
+                        "p"
+                    );
+
+
+                candidateElement.className =
+                    "transcript-turn candidate";
+
+
+                candidateElement.textContent =
+                    `candidate: ${msg.text}`;
+
+
+                if (msg.item_id) {
+
+                    candidateElement.dataset.itemId =
+                        msg.item_id;
+                }
+
+
+                transcript.appendChild(
+                    candidateElement
+                );
+            }
+
+
+            // ---------------------------------------------
+            // RESET LIVE STATE ONLY IF THIS WAS THE
+            // CURRENTLY ACTIVE CANDIDATE TURN
+            // ---------------------------------------------
+            //
+            // A late transcript from an older answer must
+            // not erase the live state of a newer answer.
+
+            if (
+                msg.item_id
+                && msg.item_id
+                    === liveCandidateItemId
+            ) {
+
+                liveCandidateText =
+                    "";
+
+                liveCandidateElement =
+                    null;
+
+                liveCandidateItemId =
+                    null;
+            }
         }
-
 
         // ---------------------------------------------
         // FINAL BIANCA TRANSCRIPT
@@ -1444,13 +2402,20 @@ function connectInterviewWebSocket() {
             // CONNECTION CLOSED
             // -------------------------------------------------
 
-            ws.onclose = () => {
+            ws.onclose = (event) => {
 
                 console.log(
-                    "TalentSift WebSocket closed"
+                    "TalentSift WebSocket closed",
+                    {
+                        code: event.code,
+                        reason: event.reason,
+                        wasClean: event.wasClean
+                    }
                 );
 
-                document.getElementById("status").textContent =
+                document.getElementById(
+                    "status"
+                ).textContent =
                     "Disconnected";
             };
 
@@ -1665,9 +2630,20 @@ function playChunk(
     }
 
 
-    // If this response was already interrupted,
-    // do not schedule more old audio.
-    if (biancaInterrupted) {
+    // If THIS specific Bianca item was already
+    // interrupted, never allow late network packets
+    // from it back into the playback queue.
+    if (
+        itemId
+        && interruptedBiancaItemIds.has(
+            itemId
+        )
+    ) {
+
+        console.log(
+            "⏭️ Ignoring late Bianca audio:",
+            itemId
+        );
 
         return;
     }
@@ -1735,8 +2711,9 @@ function playChunk(
     );
 
 
-    activeBiancaSources.add(
-        source
+    activeBiancaSources.set(
+        source,
+        itemId
     );
 
 
@@ -1769,6 +2746,85 @@ function playChunk(
     if (
         currentBiancaItemId !== itemId
     ) {
+        
+                const previousBiancaItemId =
+            currentBiancaItemId;
+
+
+        // ---------------------------------------------
+        // WAS THE PREVIOUS ITEM INTERRUPTED?
+        // ---------------------------------------------
+        //
+        // If yes, remove only audio belonging to that
+        // old item before allowing this new Bianca item
+        // to begin.
+        //
+        // Never stop audio belonging to the new item.
+
+        if (
+            previousBiancaItemId
+            && interruptedBiancaItemIds.has(
+                previousBiancaItemId
+            )
+        ) {
+
+            for (
+                const [
+                    activeSource,
+                    activeItemId
+                ]
+                of activeBiancaSources
+            ) {
+
+                if (
+                    activeItemId
+                    === previousBiancaItemId
+                ) {
+
+                    try {
+
+                        activeSource.stop();
+
+                    } catch (error) {
+
+                        // Already stopped.
+                    }
+                }
+            }
+
+
+            // The interrupted item's future queue
+            // should no longer delay this new response.
+            nextPlayTime =
+                playCtx.currentTime;
+
+
+            // The old item's fade may have taken the
+            // shared gain to zero.
+            //
+            // It is now safe to restore volume because
+            // the old item's sources have been stopped.
+            const now =
+                playCtx.currentTime;
+
+
+            biancaGainNode.gain.cancelScheduledValues(
+                now
+            );
+
+
+            biancaGainNode.gain.setValueAtTime(
+                1,
+                now
+            );
+
+
+            // This flag is still used by the current
+            // transcript UI. The NEW Bianca item is not
+            // interrupted.
+            biancaInterrupted =
+                false;
+        }
 
         currentBiancaItemId =
             itemId;
@@ -1885,6 +2941,25 @@ function gracefullyInterruptBianca() {
         "🤫 Candidate interrupted Bianca"
     );
 
+        // Capture WHICH Bianca item is being interrupted.
+    //
+    // These values must not change even if a new
+    // Bianca response starts before cleanup finishes.
+    const interruptedItemId =
+        currentBiancaItemId;
+
+
+    const interruptedContentIndex =
+        currentBiancaContentIndex;
+
+
+    if (interruptedItemId) {
+
+        interruptedBiancaItemIds.add(
+            interruptedItemId
+        );
+    }
+
     // -------------------------------------------------
     // 1. REJECT LEFTOVER OLD AUDIO
     // -------------------------------------------------
@@ -1968,25 +3043,34 @@ function gracefullyInterruptBianca() {
         // STOP ALL OLD BIANCA AUDIO
         // -------------------------------------------------
 
+                // Stop ONLY audio belonging to the Bianca item
+        // that the candidate actually interrupted.
+        //
+        // A newer Bianca response may already exist.
+
         for (
-            const source
+            const [
+                source,
+                sourceItemId
+            ]
             of activeBiancaSources
         ) {
 
-            try {
+            if (
+                sourceItemId
+                === interruptedItemId
+            ) {
 
-                source.stop();
+                try {
 
-            } catch (error) {
+                    source.stop();
 
-                // Source may already have ended.
-                // Safe to ignore.
+                } catch (error) {
+
+                    // Already ended/stopped.
+                }
             }
         }
-
-
-        activeBiancaSources.clear();
-
 
         // The old queue is now gone.
         nextPlayTime =
@@ -2016,7 +3100,7 @@ function gracefullyInterruptBianca() {
         if (
             ws
             && ws.readyState === WebSocket.OPEN
-            && currentBiancaItemId
+            && interruptedItemId
         ) {
 
             ws.send(
@@ -2025,7 +3109,7 @@ function gracefullyInterruptBianca() {
                         "playback_interrupted",
 
                     item_id:
-                        currentBiancaItemId,
+                        interruptedItemId,
 
                     content_index:
                         currentBiancaContentIndex,
@@ -2038,7 +3122,7 @@ function gracefullyInterruptBianca() {
 
             console.log(
                 "✂️ Truncation report sent:",
-                currentBiancaItemId,
+                interruptedItemId,
                 playedMs
             );
         }

@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import asynccontextmanager
 import json
 import os
 from pathlib import Path
@@ -12,19 +13,36 @@ from models import (
 )
 from pydantic import BaseModel
 from dotenv import load_dotenv
+
 from fastapi import (
     FastAPI,
     HTTPException,
     WebSocket,
     WebSocketDisconnect,
+    Request,
+    Form,
 )
+
+from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import PlainTextResponse, RedirectResponse
+
 from database import (
     initialize_database,
     load_candidate,
     load_session,
     save_session,
     save_transcript_turn,
+)
+
+from recruiter_dashboard import (
+    build_job_snapshot,
+    build_session_detail,
+)
+from scoring.session_scoring import (
+    apply_recruiter_override,
+    restore_ai_score,
+    score_database_session,
 )
 
 app = FastAPI()
@@ -83,6 +101,11 @@ SPK_RATE = 24000
 # Find the folder containing app.py.
 BASE_DIR = Path(__file__).resolve().parent
 
+templates = Jinja2Templates(
+    directory=str(
+        BASE_DIR / "templates"
+    )
+)
 
 # Build the path to our existing interviewer prompt.
 PROMPT_FILE = (
@@ -90,9 +113,6 @@ PROMPT_FILE = (
     / "prompts"
     / "interviewer_prompt.txt"
 )
-
-
-LANGUAGE = "English"
 
 
 # Load the same Bianca prompt that interviewer.py uses.
@@ -105,32 +125,116 @@ prompt_template = PROMPT_FILE.read_text(
 # INTERVIEW FINISHING RULE
 # ---------------------------------------------------------
 
-# This is added to Bianca's normal interviewer prompt.
+# Bianca decides WHEN the interview is finished.
 #
-# Bianca decides WHEN the interview requirements
-# have been completed.
-#
-# But Bianca does NOT invent the closing.
-# Instead, she calls our finish_interview tool.
+# But Bianca does not invent the final closing.
+# She calls our finish_interview tool instead.
 FINISHING_INSTRUCTIONS = """
-When you have completed the interview and there are
-no more substantive interview questions to ask,
-call the finish_interview tool.
+Conduct a focused and consistently structured interview.
+
+INTERVIEW BOUNDARIES
+
+- The main interview should fit within a maximum
+  interview window of approximately 10 minutes.
+- Do not deliberately stretch the interview to fill
+  the entire available time.
+- Cover the required job-related competency areas
+  defined in the interview instructions.
+- Ask concise questions.
+- Ask only one question at a time.
+- Use follow-up questions only when they are needed
+  to obtain useful job-related evidence.
+- Do not repeatedly probe the same competency after
+  enough evidence has already been obtained.
+- Use no more than one substantive follow-up for the
+  same main question unless clarification is essential.
+- If a candidate gives a weak, unclear, or very short
+  answer, make one reasonable attempt to clarify and
+  then move on.
+- Do not keep interviewing indefinitely because a
+  candidate's answer is incomplete.
+- If an area could not be meaningfully explored,
+  move on rather than repeatedly forcing an answer.
+
+When the required interview areas have been covered,
+or there are no more substantive questions that would
+reasonably improve the interview evidence, call the
+finish_interview tool.
 
 Do not create your own closing statement.
 Do not tell the candidate their score or whether
 they passed or failed.
 """
 
-INSTRUCTIONS = (
-    prompt_template.replace(
-        "{LANGUAGE}",
-        LANGUAGE,
-    )
-    + "\n\n"
-    + FINISHING_INSTRUCTIONS
-)
 
+
+# ---------------------------------------------------------
+# INTERVIEW TIME LIMIT
+# ---------------------------------------------------------
+#
+# All candidates for this MVP receive the same maximum
+# interview window.
+#
+# The timer begins AFTER Bianca's opening disclosure has
+# finished playing, so consent/opening time does not reduce
+# the candidate's interview opportunity.
+
+INTERVIEW_MAX_SECONDS = 10 * 60
+
+INTERVIEW_WARNING_SECONDS = 60
+
+# ---------------------------------------------------------
+# LANGUAGE MAPPING
+# ---------------------------------------------------------
+#
+# Where do "en" and "fr" come from?
+#
+# The candidate chooses one of them on the consent screen.
+#
+# Browser
+#   ↓
+# POST /api/session
+#   ↓
+# Session.language
+#   ↓
+# SQLite
+LANGUAGE_NAMES = {
+    "en": "English",
+    "fr": "French",
+}
+
+
+def build_instructions(
+    language_code: str
+) -> str:
+    """
+    Build Bianca's prompt for one interview Session.
+    """
+
+    # Example:
+    #
+    # "en" -> "English"
+    # "fr" -> "French"
+    language_name = LANGUAGE_NAMES.get(
+        language_code,
+        "English",
+    )
+
+
+    # Our interviewer prompt already contains:
+    #
+    # {LANGUAGE}
+    #
+    # Replace that placeholder with the language
+    # belonging to THIS interview session.
+    return (
+        prompt_template.replace(
+            "{LANGUAGE}",
+            language_name,
+        )
+        + "\n\n"
+        + FINISHING_INSTRUCTIONS
+    )
 
 # ---------------------------------------------------------
 # FIXED CLOSING MESSAGES
@@ -193,7 +297,7 @@ async def health():
 # BUILD OPENAI REALTIME SESSION CONFIG
 # ---------------------------------------------------------
 
-def build_session_config():
+def build_session_config(language_code: str):
     """
     Build the session.update event that tells OpenAI
     how this realtime interview session should behave.
@@ -227,8 +331,14 @@ def build_session_config():
                     # Ask OpenAI to turn candidate
                     # speech into text.
                     "transcription": {
-                        "model": "gpt-live-transcribe",
-                    },
+                    # TalentSift prioritizes accurate final interview
+                    # evidence over instant live captions.
+                    "model": "gpt-transcribe",
+
+                    "language": 
+                        language_code
+                    ,
+                },
 
                     # Server-side Voice Activity Detection.
                     #
@@ -239,18 +349,13 @@ def build_session_config():
 
                         "interrupt_response": True,
 
-                        "threshold": 0.7,
+                        "threshold": 0.5,
 
                         "prefix_padding_ms": 300,
 
-                        "silence_duration_ms": 1000,
+                        "silence_duration_ms": 1500,
 
-
-                        # Now that browser playback is being added,
-                        # OpenAI may automatically generate Bianca's
-                        # response after VAD detects that the candidate
-                        # has finished speaking.
-                        "create_response": True,
+                        "create_response": False,
                     },
                 },
 
@@ -275,30 +380,29 @@ def build_session_config():
 
             # Same interview instructions used by
             # our existing CLI interview.
-            "instructions": INSTRUCTIONS,
-
+           "instructions": build_instructions(language_code),
             "tools": [
-        {
-            "type": "function",
-            "name": "finish_interview",
-            "description": (
-                "Call this only when all required "
-                "interview questions and necessary "
-                "follow-up questions have been completed "
-                "and the interview should now end."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "additionalProperties": False,
+            {
+                "type": "function",
+                "name": "finish_interview",
+                "description": (
+                    "Call this only when all required "
+                    "interview questions and necessary "
+                    "follow-up questions have been completed "
+                    "and the interview should now end."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": False,
+                },
+            }
+        ],
+
+        "tool_choice": "auto",
+
             },
         }
-    ],
-
-    "tool_choice": "auto",
-
-        },
-    }
 
 
 @app.post("/api/session")
@@ -409,6 +513,223 @@ async def create_session(
         "language": session.language,
     }
 
+
+@asynccontextmanager
+async def connect_to_engine_with_retry(
+    session_config
+):
+    """
+    Connect to OpenAI Realtime and make sure the
+    Realtime session is actually ready before yielding
+    the WebSocket to the interview.
+
+    We retry STARTUP only.
+
+    We do not automatically reconnect in the middle
+    of an interview because that could lose or duplicate
+    conversation state.
+    """
+
+    max_attempts = 3
+
+    ws_engine = None
+
+    last_error = None
+
+
+    for attempt in range(
+        1,
+        max_attempts + 1
+    ):
+
+        candidate_ws = None
+
+
+        try:
+
+            print(
+                "🔌 Starting OpenAI Realtime:",
+                f"attempt {attempt}/{max_attempts}"
+            )
+
+
+            # -----------------------------------------
+            # 1. OPEN THE WEBSOCKET
+            # -----------------------------------------
+
+            candidate_ws = await websockets.connect(
+                ENGINE_URL,
+                additional_headers=ENGINE_HEADERS,
+                ping_interval=20,
+                ping_timeout=60,
+            )
+
+
+            print(
+                "🔗 OpenAI WebSocket connected"
+            )
+
+
+            # -----------------------------------------
+            # 2. CONFIGURE THE REALTIME SESSION
+            # -----------------------------------------
+
+            await candidate_ws.send(
+                json.dumps(
+                    session_config
+                )
+            )
+
+
+            print(
+                "⚙️ Realtime session configuration sent"
+            )
+
+
+            # -----------------------------------------
+            # 3. WAIT FOR OPENAI TO ACCEPT IT
+            # -----------------------------------------
+            #
+            # A successful WebSocket connection alone
+            # does not mean the interview session is ready.
+            #
+            # We require session.updated before this
+            # startup attempt is considered successful.
+
+            while True:
+
+                raw = await asyncio.wait_for(
+                    candidate_ws.recv(),
+                    timeout=12,
+                )
+
+
+                event = json.loads(
+                    raw
+                )
+
+
+                event_type = event.get(
+                    "type",
+                    "",
+                )
+
+
+                if (
+                    event_type
+                    == "session.updated"
+                ):
+
+                    print(
+                        "✅ OpenAI session ready"
+                    )
+
+
+                    ws_engine = (
+                        candidate_ws
+                    )
+
+
+                    break
+
+
+                # If OpenAI explicitly reports an error
+                # during startup, retry the entire startup.
+                if event_type == "error":
+
+                    raise RuntimeError(
+                        "OpenAI Realtime startup error: "
+                        + json.dumps(
+                            event
+                        )
+                    )
+
+
+            # session.updated was received.
+            if ws_engine is not None:
+
+                break
+
+
+        except Exception as error:
+
+            last_error = error
+
+
+            print(
+                "⚠️ OpenAI startup attempt failed:",
+                attempt,
+            )
+
+
+            print(
+                error
+            )
+
+
+            if candidate_ws is not None:
+
+                try:
+
+                    await candidate_ws.close()
+
+                except Exception:
+
+                    pass
+
+
+            if attempt < max_attempts:
+
+                wait_seconds = attempt
+
+
+                print(
+                    "⏳ Retrying full Realtime startup in",
+                    wait_seconds,
+                    "second(s)...",
+                )
+
+
+                await asyncio.sleep(
+                    wait_seconds
+                )
+
+
+    # ---------------------------------------------
+    # ALL THREE STARTUP ATTEMPTS FAILED
+    # ---------------------------------------------
+
+    if ws_engine is None:
+
+        if last_error is not None:
+
+            raise last_error
+
+
+        raise RuntimeError(
+            "OpenAI Realtime startup failed."
+        )
+
+
+    # ---------------------------------------------
+    # INTERVIEW MAY NOW USE THE READY SOCKET
+    # ---------------------------------------------
+
+    try:
+
+        yield ws_engine
+
+
+    finally:
+
+        try:
+
+            await ws_engine.close()
+
+        except Exception:
+
+            pass
+
 # ---------------------------------------------------------
 # BROWSER <-> TALENTSIFT <-> OPENAI
 # ---------------------------------------------------------
@@ -469,56 +790,206 @@ async def interview(
         }
     )
 
-
     try:
 
-        # -------------------------------------------------
-        # CONNECTION #2: FASTAPI -> OPENAI
-        # -------------------------------------------------
-        #
-        # We now open ANOTHER WebSocket.
-        #
-        # ws_browser:
-        #     Chrome <-> FastAPI
-        #
-        # ws_engine:
-        #     FastAPI <-> OpenAI
-        #
-        # Both are open at the same time.
-        async with websockets.connect(
-            ENGINE_URL,
-            additional_headers=ENGINE_HEADERS,
-            ping_interval=20,
-            ping_timeout=60,
+        # ---------------------------------------------
+        # BUILD THE OPENAI SESSION CONFIG ONCE
+        # ---------------------------------------------
+
+        session_config = build_session_config(
+            session.language
+        )
+
+
+        print(
+            "📝 Interview instructions length:",
+            len(
+                session_config[
+                    "session"
+                ][
+                    "instructions"
+                ]
+            ),
+        )
+
+
+        print(
+            "📝 Interview instructions preview:"
+        )
+
+
+        print(
+            session_config[
+                "session"
+            ][
+                "instructions"
+            ][:500]
+        )
+
+
+        # ---------------------------------------------
+        # CONNECT + CONFIGURE + VERIFY READINESS
+        # ---------------------------------------------
+
+        async with connect_to_engine_with_retry(
+            session_config
         ) as ws_engine:
 
             print(
-                "🤖 Connected to OpenAI Realtime"
-            )
+                "🤖 Connected to ready OpenAI Realtime session"
+            )    
 
-
-            # ---------------------------------------------
-            # CONFIGURE THE OPENAI SESSION
-            # ---------------------------------------------
-
-            # build_session_config() gives us a
-            # normal Python dictionary.
-            session_config = build_session_config()
-
-
-            # WebSockets send text.
+            # =================================================
+            # OPENING STATE
+            # =================================================
             #
-            # json.dumps() turns our dictionary
-            # into JSON text before sending it.
-            await ws_engine.send(
-                json.dumps(session_config)
-            )
+            # Do not let microphone noise or candidate speech
+            # trigger another response while Bianca's opening
+            # disclosure is still playing.
+
+            interview_state = {
+                "opening_complete": False,
+                "awaiting_opening_response": False,
+                "opening_response_id": None,
+
+                # True once the hard 10-minute interview
+                # window has been reached.
+                "time_limit_reached": False,
+
+                # Becomes True once Bianca has started
+                # the intentional finishing process.
+                "finish_requested": False,
+
+                # Holds the background timer task.
+                "timer_task": None,
+            }
 
 
-            print(
-                "⚙️ Realtime session configuration sent"
-            )
+            # =================================================
+            # INTERVIEW TIME LIMIT
+            # =================================================
 
+            async def enforce_interview_time_limit():
+                """
+                Enforce TalentSift's maximum interview window.
+
+                The clock begins only after Bianca's opening
+                has finished playing.
+                """
+
+                try:
+
+                    # -----------------------------------------
+                    # WAIT UNTIL ONE MINUTE REMAINS
+                    # -----------------------------------------
+
+                    await asyncio.sleep(
+                        INTERVIEW_MAX_SECONDS
+                        - INTERVIEW_WARNING_SECONDS
+                    )
+
+
+                    # Bianca may already have completed the
+                    # interview naturally.
+                    if interview_state[
+                        "finish_requested"
+                    ]:
+
+                        return
+
+
+                    print(
+                        "⏳ Interview has 1 minute remaining"
+                    )
+
+
+                    await ws_browser.send_json(
+                        {
+                            "type":
+                                "time_warning",
+
+                            "remaining_seconds":
+                                INTERVIEW_WARNING_SECONDS,
+                        }
+                    )
+
+
+                    # -----------------------------------------
+                    # WAIT FOR THE FINAL MINUTE
+                    # -----------------------------------------
+
+                    await asyncio.sleep(
+                        INTERVIEW_WARNING_SECONDS
+                    )
+
+
+                    if interview_state[
+                        "finish_requested"
+                    ]:
+
+                        return
+
+
+                    # -----------------------------------------
+                    # HARD LIMIT REACHED
+                    # -----------------------------------------
+
+                    interview_state[
+                        "time_limit_reached"
+                    ] = True
+
+                    interview_state[
+                        "finish_requested"
+                    ] = True
+
+                    print(
+                        "⏰ Interview time limit reached"
+                    )
+
+
+                    await ws_browser.send_json(
+                        {
+                            "type":
+                                "time_limit_reached",
+                        }
+                    )
+
+
+                    # Ask Bianca to use the EXISTING
+                    # finish_interview tool.
+                    #
+                    # This means the normal TalentSift
+                    # fixed closing still owns the ending.
+                    await ws_engine.send(
+                        json.dumps(
+                            {
+                                "type":
+                                    "response.create",
+
+                                "response": {
+                                    "instructions": (
+                                        "The maximum TalentSift "
+                                        "interview time has now "
+                                        "been reached. Do not ask "
+                                        "another interview question. "
+                                        "Call the finish_interview "
+                                        "tool immediately. Do not "
+                                        "give a score or hiring "
+                                        "decision."
+                                    )
+                                },
+                            }
+                        )
+                    )
+
+
+                except asyncio.CancelledError:
+
+                    # Normal case when Bianca finishes the
+                    # interview before the time limit.
+                    print(
+                        "⏱️ Interview timer stopped"
+                    )            
 
             # =================================================
             # PUMP #1
@@ -571,6 +1042,26 @@ async def interview(
 
                             if audio_b64:
 
+                                # During Bianca's opening disclosure,
+                                # ignore microphone audio.
+                                #
+                                # This prevents VAD from creating another
+                                # Bianca response at the same time as the
+                                # manually-created opening response.
+                                if (
+                                    not interview_state[
+                                    "opening_complete"
+                                    ] or interview_state[
+                                            "time_limit_reached"
+                                    ]
+                                     or interview_state[
+                                        "finish_requested"
+                                    ]
+                                ):
+                            
+                                    continue
+
+
                                 await ws_engine.send(
                                     json.dumps(
                                         {
@@ -583,6 +1074,156 @@ async def interview(
                                     )
                                 )
 
+
+
+                        elif (
+                            msg_type
+                            == "opening_playback_finished"
+                        ):
+
+                            # The candidate may have clicked
+                            # End Interview while Bianca's opening
+                            # was still playing.
+                            #
+                            # In that case a delayed browser timer
+                            # may still report that the opening
+                            # finished. Do not restart the interview.
+                            if interview_state[
+                                "finish_requested"
+                            ]:
+
+                                print(
+                                    "⏭️ Ignoring late opening finish "
+                                    "because interview is already ending"
+                                )
+
+                                continue
+
+                            interview_state[
+                                "opening_complete"
+                            ] = True
+
+
+                            print(
+                                "🎙️ Opening finished — candidate audio enabled"
+                            )
+
+                            # -----------------------------------------
+                            # START THE INTERVIEW CLOCK
+                            # -----------------------------------------
+                            #
+                            # Protect against the browser accidentally
+                            # sending this message twice.
+
+                            if (
+                                interview_state[
+                                    "timer_task"
+                                ]
+                                is None
+                            ):
+
+                                interview_state[
+                                    "timer_task"
+                                ] = asyncio.create_task(
+                                    enforce_interview_time_limit()
+                                )
+
+
+                                print(
+                                    "⏱️ 10-minute interview timer started"
+                                )
+
+
+                                # Tell the browser the official
+                                # TalentSift interview clock has started.
+                                await ws_browser.send_json(
+                                    {
+                                        "type":
+                                            "interview_timer_started",
+
+                                        "total_seconds":
+                                            INTERVIEW_MAX_SECONDS,
+                                    }
+                                )
+
+
+
+                            await ws_browser.send_json(
+                                {
+                                    "type": "status",
+                                    "value": "listening",
+                                }
+                            )
+
+                        # ============================================
+                        # CANDIDATE ENDED INTERVIEW EARLY
+                        # ============================================
+
+                        elif (
+                            msg_type
+                            == "end_interview"
+                        ):
+
+                            print(
+                                "🛑 Candidate ended interview early"
+                            )
+
+
+                            # Prevent any more normal Bianca
+                            # questions from being created.
+                            interview_state[
+                                "finish_requested"
+                            ] = True
+
+
+                            # Stop the interview timer.
+                            timer_task = interview_state[
+                                "timer_task"
+                            ]
+
+
+                            if (
+                                timer_task
+                                and not timer_task.done()
+                            ):
+
+                                timer_task.cancel()
+
+
+                            # Load the real Session.
+                            ended_session = load_session(
+                                session_id
+                            )
+
+
+                            # This is NOT a normal completion.
+                            ended_session.status = (
+                                "ended_early"
+                            )
+
+
+                            ended_session.ended_at = utc_now()
+
+
+                            save_session(
+                                ended_session
+                            )
+
+
+                            print(
+                                "✅ Session marked ended_early:",
+                                ended_session.id,
+                            )
+
+
+                            # Tell the candidate browser that
+                            # persistence succeeded.
+                            await ws_browser.send_json(
+                                {
+                                    "type":
+                                        "interview_ended_early",
+                                }
+                            )
 
                         # ============================================
                         # BIANCA WAS INTERRUPTED
@@ -709,7 +1350,7 @@ async def interview(
                                 completed_session.ended_at,
                             )
 
-
+                            
                             # Tell the browser it can now move
                             # to the Done screen.
                             await ws_browser.send_json(
@@ -718,6 +1359,63 @@ async def interview(
                                         "interview_complete",
                                 }
                             )
+
+
+                            try:
+
+                                scorecard, scorecard_path = (
+                                    await asyncio.to_thread(
+                                        score_database_session,
+                                        session_id,
+                                            )
+                                        )
+
+
+                                print(
+                                    "📊 Scorecard created:",
+                                    scorecard.overall,
+                                    "saved to:",
+                                    scorecard_path,
+                                )
+
+
+                            except Exception as error:
+
+                        
+                                print(
+                                    "❌ Scorecard creation failed:"
+                                )
+
+                                print(
+                                    error
+                                )
+
+
+                                # Mark an active interview as failed
+                                # when the interview relay crashes.
+                                failed_session = load_session(
+                                    session_id
+                                )
+
+                                if failed_session.status == "in_progress":
+
+                                    failed_session.status = "failed"
+
+                                    failed_session.failure_reason = (
+                                        f"Interview relay error: {error}"
+                                    )
+
+                                    failed_session.ended_at = utc_now()
+
+                                    save_session(
+                                        failed_session
+                                    )
+
+                                    print(
+                                        "⚠️ Session marked failed:",
+                                        failed_session.id,
+                                        failed_session.failure_reason,
+                                    )
 
                         else:
 
@@ -756,7 +1454,59 @@ async def interview(
                 # CLOSING RESPONSE STATE
                 # -------------------------------------------------
                 awaiting_closing_response = False          
-                closing_response_id = None          
+                closing_response_id = None
+                # -------------------------------------------------
+                # CANDIDATE INTERRUPTION STATE
+                # -------------------------------------------------
+                #
+                # VAD can sometimes briefly detect breathing,
+                # clicks, background speech, or other noise as
+                # candidate speech.
+                #
+                # We therefore wait a short moment before telling
+                # the browser to interrupt Bianca.
+
+                candidate_is_speaking = False
+
+                interruption_task = None
+
+
+                async def confirm_candidate_interruption():
+
+                    try:
+
+                        # Give VAD a short confirmation window.
+                        await asyncio.sleep(
+                            0.25
+                        )
+
+
+                        # If speech is still active after 250 ms,
+                        # treat it as a real candidate interruption.
+                        if candidate_is_speaking:
+
+                            await ws_browser.send_json(
+                                {
+                                    "type": "interrupt",
+                                }
+                            )
+
+
+                            print(
+                                "🤫 Candidate interruption confirmed"
+                            )
+
+
+                    except asyncio.CancelledError:
+
+                        # Speech stopped before the confirmation
+                        # window finished.
+                        #
+                        # Treat that as a tiny/noisy trigger rather
+                        # than interrupting Bianca.
+                        print(
+                            "🔇 Short speech trigger ignored"
+                        )         
                 async for raw in ws_engine:
 
                     # OpenAI JSON text
@@ -780,33 +1530,14 @@ async def interview(
                         == "session.updated"
                     ):
 
+                        # Initial session.updated is now consumed
+                        # by connect_to_engine_with_retry().
+                        #
+                        # If another update acknowledgement ever
+                        # arrives later, it must NOT start another
+                        # Bianca opening.
                         print(
-                            "✅ OpenAI session ready"
-                        )
-
-
-                        # Tell the browser:
-                        #
-                        # "The entire route all the way
-                        # to OpenAI is now ready."
-                        await ws_browser.send_json(
-                            {
-                                "type": "status",
-                                "value": "engine_ready",
-                            }
-                        )
-
-                        # Ask OpenAI to generate Bianca's opening
-                        # interview turn.
-                        #
-                        # Without this, create_response=True only helps
-                        # AFTER candidate speech is detected.
-                        await ws_engine.send(
-                            json.dumps(
-                                {
-                                    "type": "response.create"
-                                }
-                            )
+                            "ℹ️ Additional session.updated received"
                         )
 
                     elif event_type == "response.created":
@@ -816,6 +1547,7 @@ async def interview(
                         )
 
 
+                        # Get the response OpenAI just created.
                         response_data = event.get(
                             "response",
                             {},
@@ -825,6 +1557,37 @@ async def interview(
                         response_id = response_data.get(
                             "id"
                         )
+
+
+                        # -----------------------------------------
+                        # IS THIS THE OPENING RESPONSE?
+                        # -----------------------------------------
+                        #
+                        # session.updated sets this flag immediately
+                        # before TalentSift manually requests Bianca's
+                        # opening.
+                        #
+                        # Therefore the next response.created event
+                        # belongs to the opening.
+
+                        if interview_state[
+                            "awaiting_opening_response"
+                        ]:
+
+                            interview_state[
+                                "opening_response_id"
+                            ] = response_id
+
+
+                            interview_state[
+                                "awaiting_opening_response"
+                            ] = False
+
+
+                            print(
+                                "🎬 Opening response started:",
+                                response_id,
+                            )
 
 
                         # -----------------------------------------
@@ -844,11 +1607,14 @@ async def interview(
                             )
 
 
+                        # Tell the browser that OpenAI has begun
+                        # producing another Bianca response.
                         await ws_browser.send_json(
                             {
                                 "type": "response_started",
                             }
                         )
+
 
                     # ---------------------------------
                     # OPENAI FINISHED A RESPONSE
@@ -865,6 +1631,36 @@ async def interview(
                         response_id = response_data.get(
                             "id"
                         )
+
+
+                        if (
+                        interview_state[
+                                "opening_response_id"
+                            ]
+                            and response_id
+                                == interview_state[
+                                    "opening_response_id"
+                                ]
+                        ):
+
+                            print(
+                                "✅ Opening response fully generated"
+                            )
+
+
+                            await ws_browser.send_json(
+                                {
+                                    "type":
+                                        "opening_generated",
+                                }
+                            )
+
+                            # We no longer need to keep this ID
+                            # after the opening has completed.
+                            interview_state[
+                                "opening_response_id"
+                            ] = None
+
 
 
                         # Is this the closing response we saved earlier?
@@ -916,6 +1712,27 @@ async def interview(
                             print(
                                 "🏁 Bianca requested interview finish"
                             )
+
+                            # -----------------------------------------
+                            # INTERVIEW IS NOW FINISHING
+                            # -----------------------------------------
+
+                            interview_state[
+                                "finish_requested"
+                            ] = True
+
+
+                            timer_task = interview_state[
+                                "timer_task"
+                            ]
+
+
+                            if (
+                                timer_task
+                                and not timer_task.done()
+                            ):
+
+                                timer_task.cancel()   
 
 
                             # -----------------------------------------
@@ -1218,6 +2035,7 @@ async def interview(
                                     "type": "transcript_delta",
                                     "speaker": "candidate",
                                     "text": delta_text,
+                                    "item_id": event.get("item_id"),
                                 }
                             )
                     # ---------------------------------
@@ -1283,8 +2101,59 @@ async def interview(
 
                                     "text":
                                         candidate_text,
+
+                                    # Same ID used by the live deltas.
+                                    # This lets the browser replace/finalize
+                                    # the correct candidate answer.
+                                    "item_id": event.get("item_id"),
                                 }
                             )
+
+                            # ---------------------------------------------
+                            # ONLY CONTINUE IF THE INTERVIEW IS ACTIVE
+                            # ---------------------------------------------
+                            #
+                            # A candidate transcript may finish processing
+                            # at almost the same moment that:
+                            #
+                            # 1. Bianca naturally finishes, or
+                            # 2. the hard interview time limit is reached.
+                            #
+                            # We still KEEP the candidate transcript above,
+                            # but we must not create another Bianca question.
+
+                            if (
+                                not interview_state[
+                                    "finish_requested"
+                                ]
+                                and not interview_state[
+                                    "time_limit_reached"
+                                ]
+                            ):
+
+                                await ws_engine.send(
+                                    json.dumps(
+                                        {
+                                            "type":
+                                                "response.create"
+                                        }
+                                    )
+                                )
+
+
+                                print(
+                                    "➡️ Candidate transcript accepted "
+                                    "— Bianca response requested"
+                                )
+
+
+                            else:
+
+                                print(
+                                    "⏭️ Candidate transcript saved, "
+                                    "but no new Bianca response was requested "
+                                    "because the interview is finishing"
+                                )
 
 
                     # ---------------------------------
@@ -1301,21 +2170,28 @@ async def interview(
                         )
 
 
-                        # -------------------------------------------------
-                        # TELL THE BROWSER TO STOP BIANCA GRACEFULLY
-                        # -------------------------------------------------
+                        # Mark speech as currently active.
+                        candidate_is_speaking = True
+
+
+                        # If an old confirmation timer somehow
+                        # still exists, cancel it first.
+                        if (
+                            interruption_task
+                            and not interruption_task.done()
+                        ):
+
+                            interruption_task.cancel()
+
+
+                        # Do NOT interrupt Bianca immediately.
                         #
-                        # FastAPI cannot directly control the candidate's
-                        # laptop speakers.
-                        #
-                        # The browser owns playback, so we send a small
-                        # TalentSift message telling JavaScript:
-                        #
-                        # "The candidate has interrupted Bianca."
-                        await ws_browser.send_json(
-                            {
-                                "type": "interrupt",
-                            }
+                        # First confirm that candidate speech lasts
+                        # longer than a tiny noise trigger.
+                        interruption_task = (
+                            asyncio.create_task(
+                                confirm_candidate_interruption()
+                            )
                         )
 
 
@@ -1325,7 +2201,6 @@ async def interview(
                                 "value": "listening",
                             }
                         )
-
                     # ---------------------------------
                     # VAD: CANDIDATE STOPPED SPEAKING
                     # ---------------------------------
@@ -1344,13 +2219,27 @@ async def interview(
                         )
 
 
+                        # Candidate is no longer speaking.
+                        candidate_is_speaking = False
+
+
+                        # If speech ended before our 250 ms
+                        # confirmation window completed, cancel
+                        # the interruption.
+                        if (
+                            interruption_task
+                            and not interruption_task.done()
+                        ):
+
+                            interruption_task.cancel()
+
+
                         await ws_browser.send_json(
                             {
                                 "type": "status",
                                 "value": "processing",
                             }
                         )
-
 
                     # ---------------------------------
                     # OPENAI ERROR
@@ -1370,6 +2259,47 @@ async def interview(
                         )
 
 
+
+            # =================================================
+            # READY -> START BIANCA'S OPENING
+            # =================================================
+            #
+            # At this point:
+            #
+            # 1. OpenAI WebSocket is connected.
+            # 2. session.update was sent.
+            # 3. OpenAI acknowledged it with session.updated.
+            #
+            # Only now do we tell the browser that the engine
+            # is ready and request Bianca's opening.
+
+            await ws_browser.send_json(
+                {
+                    "type": "status",
+                    "value": "engine_ready",
+                }
+            )
+
+
+            interview_state[
+                "awaiting_opening_response"
+            ] = True
+
+
+            await ws_engine.send(
+                json.dumps(
+                    {
+                        "type":
+                            "response.create"
+                    }
+                )
+            )
+
+
+            print(
+                "🎬 Bianca opening requested"
+            )
+
             # =================================================
             # RUN BOTH PUMPS AT THE SAME TIME
             # =================================================
@@ -1388,6 +2318,168 @@ async def interview(
 
         print(error)
 
+
+@app.get("/recruiter/job/{job_id}")
+def recruiter_job_dashboard(
+    request: Request,
+    job_id: str,
+):
+    """
+    Render the recruiter dashboard for one job.
+    """
+
+    snapshot = build_job_snapshot(
+        job_id
+    )
+
+
+    return templates.TemplateResponse(
+        request=request,
+        name="recruiter_leaderboard.html",
+        context={
+            "job_id":
+                job_id,
+
+            "snapshot":
+                snapshot,
+        },
+    )
+
+
+@app.get("/recruiter/session/{session_id}")
+def recruiter_session_detail(
+    request: Request,
+    session_id: str,
+):
+    """
+    Show the full recruiter audit view
+    for one interview Session.
+    """
+
+    detail = build_session_detail(
+        session_id
+    )
+
+    return templates.TemplateResponse(
+        request=request,
+        name="recruiter_session.html",
+        context={
+            "detail": detail,
+        },
+    )
+
+@app.post("/recruiter/session/{session_id}/override")
+def recruiter_override(
+    session_id: str,
+    score: float = Form(...),
+    reason: str = Form(...),
+):
+    """
+    Apply a recruiter override to one Scorecard.
+    """
+
+    apply_recruiter_override(
+        session_id=session_id,
+        score=score,
+        reason=reason,
+        overridden_by="demo-recruiter",
+    )
+
+    return RedirectResponse(
+        url=f"/recruiter/session/{session_id}",
+        status_code=303,
+    )
+
+
+@app.post("/recruiter/session/{session_id}/restore-ai")
+def recruiter_restore_ai_score(
+    session_id: str,
+    reason: str = Form(...),
+):
+    """
+    Restore the original AI overall as the
+    effective ranking score.
+    """
+
+    restore_ai_score(
+        session_id=session_id,
+        reason=reason,
+        restored_by="demo-recruiter",
+    )
+
+
+    return RedirectResponse(
+        url=f"/recruiter/session/{session_id}",
+        status_code=303,
+    )
+
+@app.get("/recruiter/session/{session_id}/transcript.txt")
+def download_transcript(
+    session_id: str,
+):
+    """turn_detection
+
+    Download the original interview transcript
+    as a plain text file.
+    """
+
+    detail = build_session_detail(
+        session_id
+    )
+
+    lines = [
+        "TalentSift Interview Transcript",
+        "",
+        f"Candidate: {detail['candidate']['full_name'] or 'Not provided'}",
+        f"Candidate ID: {detail['candidate']['id']}",
+        f"Job ID: {detail['job_id']}",
+        f"Session ID: {detail['session_id']}",
+        f"Language: {detail['interview']['language']}",
+        f"Started: {detail['interview']['started_at'] or '—'}",
+        f"Ended: {detail['interview']['ended_at'] or '—'}",
+        "",
+        "-" * 60,
+        "",
+    ]
+
+    for turn in detail["transcript"]:
+
+        speaker = (
+            "Bianca"
+            if turn["speaker"] == "interviewer"
+            else "Candidate"
+        )
+
+        timestamp = (
+            turn["timestamp"]
+            or "No timestamp"
+        )
+
+        lines.append(
+            f"{speaker} [{timestamp}]"
+        )
+
+        lines.append(
+            turn["text"]
+        )
+
+        lines.append("")
+
+    transcript_text = "\n".join(
+        lines
+    )
+
+    filename = (
+        f"talentsift-transcript-{session_id}.txt"
+    )
+
+    return PlainTextResponse(
+        content=transcript_text,
+        headers={
+            "Content-Disposition":
+                f'attachment; filename="{filename}"'
+        },
+    )
 
 # ---------------------------------------------------------
 # SERVE FRONTEND FILES

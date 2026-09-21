@@ -115,6 +115,7 @@ class Session(BaseModel):
         "pending",
         "in_progress",
         "completed",
+        "ended_early",
         "failed"
     ] = "pending"
 
@@ -154,6 +155,11 @@ class Session(BaseModel):
     # None until the interview has finished.
     ended_at: datetime | None = None
 
+
+    # Filled only when the interview itself
+    # ends abnormally.
+    failure_reason: str | None = None
+    
     # Final transcript turns.
     #
     # Do NOT save every live transcription fragment here.
