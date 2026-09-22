@@ -261,7 +261,7 @@
 
     </table>
 
-        <h2>
+            <h2>
         Controlled Fairness Testing
     </h2>
 
@@ -285,134 +285,221 @@
                 <p class="muted">
                     {{ test.phase }}
                     ·
+                    {{
+                        test.category
+                        | replace("_", " ")
+                        | title
+                    }}
+                    ·
                     {{ test.status | title }}
                 </p>
 
-            </div>
-
-
-            <h3>
-                Controlled setup
-            </h3>
-
-
-            <ul>
-
-                {% for item in test.controlled_setup %}
-
-                    <li>
-                        {{ item }}
-                    </li>
-
-                {% endfor %}
-
-            </ul>
-
-
-            <table>
-
-                <thead>
-
-                    <tr>
-
-                        <th>
-                            {{ test.variable_tested }}
-                        </th>
-
-                        <th>
-                            Transcript observation
-                        </th>
-
-                        <th>
-                            Relevant Experience
-                        </th>
-
-                        <th>
-                            Problem Solving
-                        </th>
-
-                        <th>
-                            Communication
-                        </th>
-
-                        <th>
-                            Overall
-                        </th>
-
-                    </tr>
-
-                </thead>
-
-
-                <tbody>
-
-                    {% for run in test.runs %}
-
-                        <tr>
-
-                            <td>
-                                <strong>
-                                    {{ run.condition }}
-                                </strong>
-                            </td>
-
-                            <td>
-                                {{ run.transcript_observation }}
-                            </td>
-
-                            <td>
-                                {{ run.scores.relevant_experience }}
-                            </td>
-
-                            <td>
-                                {{ run.scores.problem_solving }}
-                            </td>
-
-                            <td>
-                                {{ run.scores.communication }}
-                            </td>
-
-                            <td>
-                                {{
-                                    "%.1f"|format(
-                                        run.scores.overall
-                                    )
-                                }}
-                            </td>
-
-                        </tr>
-
-                    {% endfor %}
-
-                </tbody>
-
-            </table>
-
-
-            <h3>
-                Finding
-            </h3>
-
-
-            <div class="notice">
-
                 <p>
-                    {{ test.finding }}
+                    {{ test.objective }}
                 </p>
 
             </div>
 
 
-            {% if test.remaining_testing %}
+            {# =========================================
+               PENDING / FUTURE TEST
+               ========================================= #}
+
+            {% if test.status == "pending" %}
 
                 <h3>
-                    Remaining testing
+                    Status
+                </h3>
+
+                <div class="notice">
+
+                    <p>
+                        This test has not yet been completed.
+                    </p>
+
+                    {% if test.reason_pending %}
+
+                        <p>
+                            {{ test.reason_pending }}
+                        </p>
+
+                    {% endif %}
+
+                </div>
+
+
+            {# =========================================
+               PROMPT-INJECTION GUARDRAILS
+               ========================================= #}
+
+            {% elif test.category == "guardrail" %}
+
+                <h3>
+                    Guardrail cases
+                </h3>
+
+
+                <table>
+
+                    <thead>
+
+                        <tr>
+                            <th>
+                                Test case
+                            </th>
+
+                            <th>
+                                Candidate statement
+                            </th>
+
+                            <th>
+                                Observed result
+                            </th>
+                        </tr>
+
+                    </thead>
+
+
+                    <tbody>
+
+                        {% for case in test.cases %}
+
+                            <tr>
+
+                                <td>
+                                    <strong>
+                                        {{ case.name }}
+                                    </strong>
+                                </td>
+
+                                <td>
+                                    {{ case.candidate_text }}
+                                </td>
+
+                                <td>
+                                    {{ case.observed_result }}
+                                </td>
+
+                            </tr>
+
+                        {% endfor %}
+
+                    </tbody>
+
+                </table>
+
+
+                <h3>
+                    Finding
+                </h3>
+
+
+                <div class="notice">
+
+                    <p>
+                        {{ test.finding }}
+                    </p>
+
+                </div>
+
+
+            {# =========================================
+               MATCHED-PAIR SCORING TESTS
+               ========================================= #}
+
+            {% elif test.category == "matched_pair" %}
+
+                <h3>
+                    Matched-pair cases
+                </h3>
+
+
+                <table>
+
+                    <thead>
+
+                        <tr>
+                            <th>
+                                Comparison
+                            </th>
+
+                            <th>
+                                Variable tested
+                            </th>
+
+                            <th>
+                                Expected outcome
+                            </th>
+
+                            <th>
+                                Observed result
+                            </th>
+                        </tr>
+
+                    </thead>
+
+
+                    <tbody>
+
+                        {% for case in test.cases %}
+
+                            <tr>
+
+                                <td>
+                                    <strong>
+                                        {{ case.name }}
+                                    </strong>
+                                </td>
+
+                                <td>
+                                    {{ case.variable_tested }}
+                                </td>
+
+                                <td>
+                                    {{ case.fair_expectation }}
+                                </td>
+
+                                <td>
+                                    {{ case.observed_result }}
+                                </td>
+
+                            </tr>
+
+                        {% endfor %}
+
+                    </tbody>
+
+                </table>
+
+
+                <h3>
+                    Finding
+                </h3>
+
+
+                <div class="notice">
+
+                    <p>
+                        {{ test.finding }}
+                    </p>
+
+                </div>
+
+
+            {# =========================================
+               SPEAKING-RATE / VOICE PIPELINE TEST
+               ========================================= #}
+
+            {% elif test.type == "speaking_rate" %}
+
+                <h3>
+                    Controlled setup
                 </h3>
 
 
                 <ul>
 
-                    {% for item in test.remaining_testing %}
+                    {% for item in test.controlled_setup %}
 
                         <li>
                             {{ item }}
@@ -421,6 +508,122 @@
                     {% endfor %}
 
                 </ul>
+
+
+                <table>
+
+                    <thead>
+
+                        <tr>
+                            <th>
+                                Speaking rate
+                            </th>
+
+                            <th>
+                                Transcript observation
+                            </th>
+
+                            <th>
+                                Relevant Experience
+                            </th>
+
+                            <th>
+                                Problem Solving
+                            </th>
+
+                            <th>
+                                Communication
+                            </th>
+
+                            <th>
+                                Overall
+                            </th>
+                        </tr>
+
+                    </thead>
+
+
+                    <tbody>
+
+                        {% for run in test.runs %}
+
+                            <tr>
+
+                                <td>
+                                    <strong>
+                                        {{ run.condition }}
+                                    </strong>
+                                </td>
+
+                                <td>
+                                    {{ run.transcript_observation }}
+                                </td>
+
+                                <td>
+                                    {{
+                                        run.scores.relevant_experience
+                                    }}
+                                </td>
+
+                                <td>
+                                    {{
+                                        run.scores.problem_solving
+                                    }}
+                                </td>
+
+                                <td>
+                                    {{
+                                        run.scores.communication
+                                    }}
+                                </td>
+
+                                <td>
+                                    {{
+                                        "%.1f"|format(
+                                            run.scores.overall
+                                        )
+                                    }}
+                                </td>
+
+                            </tr>
+
+                        {% endfor %}
+
+                    </tbody>
+
+                </table>
+
+
+                <h3>
+                    Finding
+                </h3>
+
+
+                <div class="notice">
+
+                    <p>
+                        {{ test.finding }}
+                    </p>
+
+                </div>
+
+
+            {# =========================================
+               FALLBACK FOR FUTURE COMPLETED TEST TYPES
+               ========================================= #}
+
+            {% else %}
+
+                <div class="notice">
+
+                    <p>
+                        A controlled test record exists,
+                        but this dashboard does not yet
+                        have a dedicated presentation
+                        for this test type.
+                    </p>
+
+                </div>
 
             {% endif %}
 
@@ -440,7 +643,6 @@
         </div>
 
     {% endif %}
-
 
     <h2>
         Current limitations
@@ -467,10 +669,11 @@
             later human decisions.
         </p>
 
-        <p>
-            Controlled matched-pair testing should be
-            reviewed separately alongside these
-            production monitoring statistics.
+               <p>
+            Controlled guardrail, matched-pair, and
+            voice-pipeline tests should be reviewed
+            separately alongside production monitoring
+            statistics.
         </p>
 
     </div>
