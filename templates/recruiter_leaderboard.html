@@ -28,7 +28,10 @@
         .cards {
             display: grid;
             grid-template-columns:
-                repeat(4, minmax(140px, 1fr));
+                repeat(
+                    auto-fit,
+                    minmax(140px, 1fr)
+                );
             gap: 12px;
             margin: 20px 0 30px;
         }
@@ -98,6 +101,15 @@
         Job:
         <strong>{{ job_id }}</strong>
     </p>
+
+    <p>
+        <a
+            href="/recruiter/job/{{ job_id }}/fairness"
+        >
+            View fairness monitoring →
+        </a>
+    </p>
+
 <p class="muted">
     Dashboard updates automatically every 5 seconds.
 </p>
@@ -122,12 +134,22 @@
             </strong>
         </div>
 
-        <div class="card">
+                <div class="card">
             Completed
             <strong>
                 {{ snapshot.status_counts.completed }}
             </strong>
         </div>
+
+        <div class="card">
+            Ended early
+            <strong>
+                {{ snapshot.status_counts.ended_early }}
+            </strong>
+        </div>
+
+        <div class="card">
+            Failed
 
         <div class="card">
             Failed
@@ -168,8 +190,12 @@
                             {{ interview.candidate_name }}
                         </td>
 
-                        <td>
-                            {{ interview.status }}
+                                                <td>
+                            {{
+                                interview.status
+                                | replace("_", " ")
+                                | title
+                            }}
                         </td>
 
                         <td>

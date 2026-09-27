@@ -36,6 +36,7 @@ from database import (
 )
 
 from recruiter_dashboard import (
+    build_fairness_summary,
     build_job_snapshot,
     build_session_detail,
 )
@@ -2344,6 +2345,35 @@ def recruiter_job_dashboard(
                 snapshot,
         },
     )
+
+
+@app.get("/recruiter/job/{job_id}/fairness")
+def recruiter_fairness_dashboard(
+    request: Request,
+    job_id: str,
+):
+    """
+    Show descriptive fairness-monitoring statistics
+    for one job.
+    """
+
+    summary = build_fairness_summary(
+        job_id
+    )
+
+
+    return templates.TemplateResponse(
+        request=request,
+        name="recruiter_fairness.html",
+        context={
+            "job_id":
+                job_id,
+
+            "summary":
+                summary,
+        },
+    )
+
 
 
 @app.get("/recruiter/session/{session_id}")

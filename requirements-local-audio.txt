@@ -1,0 +1,6 @@
+-r requirements.txt
+
+cffi==2.1.0
+numpy==2.4.6
+pycparser==3.0
+sounddevice==0.5.5

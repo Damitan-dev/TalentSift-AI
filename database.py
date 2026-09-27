@@ -4,9 +4,7 @@ import sqlite3
 # sqlite3 is built into Python.
 # We do NOT need to install another package.
 
-from pathlib import Path
-# Path helps us safely create the data folder
-# and database filename.
+from config import DATA_DIR
 
 from datetime import datetime
 # We need this to turn stored timestamp text
@@ -23,10 +21,10 @@ from models import (
 # DATABASE LOCATION
 # ---------------------------------------------------------
 
-DATA_DIR = Path("data")
-
-DATABASE_PATH = DATA_DIR / "talentsift.db"
-
+DATABASE_PATH = (
+    DATA_DIR
+    / "talentsift.db"
+)
 
 def get_connection():
     """
