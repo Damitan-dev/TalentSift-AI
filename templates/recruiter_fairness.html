@@ -1,129 +1,43 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0"
-    >
-
-        <meta
-        http-equiv="refresh"
-        content="5"
-    >
-
-    <title>
-        TalentSift Fairness Monitoring
-    </title>
-
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 32px;
-            background: #f7f7f7;
-            color: #222;
-        }
-
-        .page {
-            max-width: 1100px;
-            margin: 0 auto;
-        }
-
-        .nav {
-            margin-bottom: 24px;
-        }
-
-        .cards {
-            display: grid;
-            grid-template-columns:
-                repeat(
-                    auto-fit,
-                    minmax(180px, 1fr)
-                );
-            gap: 12px;
-            margin: 24px 0 32px;
-        }
-
-        .card {
-            background: white;
-            border: 1px solid #ddd;
-            border-radius: 8px;
-            padding: 18px;
-        }
-
-        .card strong {
-            display: block;
-            font-size: 26px;
-            margin-top: 8px;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            background: white;
-            margin-bottom: 32px;
-        }
-
-        th,
-        td {
-            border-bottom: 1px solid #ddd;
-            padding: 14px;
-            text-align: left;
-        }
-
-        th {
-            background: #f0f0f0;
-        }
-
-        .notice {
-            background: white;
-            border-left: 4px solid #555;
-            padding: 18px;
-            margin: 24px 0;
-        }
-
-        .muted {
-            color: #666;
-        }
-
-        a {
-            color: inherit;
-        }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="refresh" content="5">
+    <title>TalentSift Fairness Monitoring</title>
+    <link rel="stylesheet" href="/styles.css?v=7">
 </head>
-
-<body>
-
-<div class="page">
-
-    <div class="nav">
-        <a
-            href="/recruiter/job/{{ job_id }}"
-        >
-            ← Back to recruiter dashboard
-        </a>
-    </div>
-
-
-    <h1>
-        Fairness Monitoring
-    </h1>
-
-
-    <p>
-        Job:
-        <strong>{{ job_id }}</strong>
-    </p>
-
-
-    <p class="muted">
-        Descriptive monitoring of completed
-        TalentSift interviews.
-    </p>
-
-
-    <div class="notice">
+<body class="ts-fairness">
+    <header class="site-header">
+        <div class="site-header__inner">
+            <div class="brand" aria-label="TalentSift"><span class="brand-mark" aria-hidden="true"></span><span>TalentSift</span></div>
+            <nav class="header-nav" aria-label="Recruiter pages">
+                <a href="/recruiter/jobs">Jobs</a>
+                <a href="/recruiter/job/{{ job_id }}">Dashboard</a>
+                <span aria-current="page">Fairness</span>
+            {% include 'recruiter_logout.html' %}
+            </nav>
+        </div>
+    </header>
+    <main class="page-shell fairness-shell">
+        <div class="page-hero">
+            <div>
+                <a class="back-link" href="/recruiter/job/{{ job_id }}">← Back to recruiter dashboard</a>
+                <span class="eyebrow">RECRUITER WORKSPACE</span>
+                <h1>Fairness Monitoring</h1>
+                <p>Job: <strong>{{ job_title or job_id }}</strong></p>
+                {% if job_title %}<p class="muted">Job ID: {{ job_id }}</p>{% endif %}
+                <p class="muted">Descriptive monitoring of completed TalentSift interviews.</p>
+            </div>
+        </div>
+        <nav class="section-tabs" aria-label="Fairness sections">
+            <a href="#coverage">Overview</a>
+            <a href="#languages">Language comparison</a>
+            <a href="#tests">Controlled tests</a>
+            <a href="#limitations">Limitations</a>
+        </nav>
+        <div class="interpretation">
+<div class="notice">
 
         <strong>
             How to interpret this page
@@ -144,11 +58,9 @@
 
     </div>
 
-
-    <h2>
-        Evaluation Coverage
-    </h2>
-
+            </div>
+        <section id="coverage" class="content-section">
+            <div class="section-heading"><h2>Evaluation Coverage</h2><span>Based on completed interviews</span></div>
 
     <div class="cards">
 
@@ -160,7 +72,6 @@
             </strong>
         </div>
 
-
         <div class="card">
             Scored interviews
 
@@ -168,7 +79,6 @@
                 {{ summary.scored_interviews }}
             </strong>
         </div>
-
 
         <div class="card">
             Completed without score
@@ -182,11 +92,10 @@
 
     </div>
 
-
-    <h2>
-        Interview Language Comparison
-    </h2>
-
+            </section>
+        <section id="languages" class="data-panel">
+            <div class="section-heading"><h2>Interview Language Comparison</h2><span>Scored and unscored sessions by language</span></div>
+            <div class="table-scroll">
 
     <table>
 
@@ -209,7 +118,6 @@
                 </th>
             </tr>
         </thead>
-
 
         <tbody>
 
@@ -261,16 +169,15 @@
 
     </table>
 
-            <h2>
-        Controlled Fairness Testing
-    </h2>
-
+                        </div>
+        </section>
+        <section id="tests" class="data-panel tests-panel">
+            <div class="section-heading"><h2>Controlled Fairness Testing</h2><span>Separate development experiments</span></div>
 
     <p class="muted">
         Controlled development experiments are stored
         separately from live interview monitoring.
     </p>
-
 
     {% if summary.fairness_tests %}
 
@@ -300,7 +207,6 @@
 
             </div>
 
-
             {# =========================================
                PENDING / FUTURE TEST
                ========================================= #}
@@ -327,7 +233,6 @@
 
                 </div>
 
-
             {# =========================================
                PROMPT-INJECTION GUARDRAILS
                ========================================= #}
@@ -337,7 +242,6 @@
                 <h3>
                     Guardrail cases
                 </h3>
-
 
                 <table>
 
@@ -358,7 +262,6 @@
                         </tr>
 
                     </thead>
-
 
                     <tbody>
 
@@ -388,11 +291,9 @@
 
                 </table>
 
-
                 <h3>
                     Finding
                 </h3>
-
 
                 <div class="notice">
 
@@ -401,7 +302,6 @@
                     </p>
 
                 </div>
-
 
             {# =========================================
                MATCHED-PAIR SCORING TESTS
@@ -412,7 +312,6 @@
                 <h3>
                     Matched-pair cases
                 </h3>
-
 
                 <table>
 
@@ -437,7 +336,6 @@
                         </tr>
 
                     </thead>
-
 
                     <tbody>
 
@@ -471,11 +369,9 @@
 
                 </table>
 
-
                 <h3>
                     Finding
                 </h3>
-
 
                 <div class="notice">
 
@@ -484,7 +380,6 @@
                     </p>
 
                 </div>
-
 
             {# =========================================
                SPEAKING-RATE / VOICE PIPELINE TEST
@@ -495,7 +390,6 @@
                 <h3>
                     Controlled setup
                 </h3>
-
 
                 <ul>
 
@@ -508,7 +402,6 @@
                     {% endfor %}
 
                 </ul>
-
 
                 <table>
 
@@ -541,7 +434,6 @@
                         </tr>
 
                     </thead>
-
 
                     <tbody>
 
@@ -593,11 +485,9 @@
 
                 </table>
 
-
                 <h3>
                     Finding
                 </h3>
-
 
                 <div class="notice">
 
@@ -606,7 +496,6 @@
                     </p>
 
                 </div>
-
 
             {# =========================================
                FALLBACK FOR FUTURE COMPLETED TEST TYPES
@@ -627,9 +516,7 @@
 
             {% endif %}
 
-
         {% endfor %}
-
 
     {% else %}
 
@@ -644,10 +531,9 @@
 
     {% endif %}
 
-    <h2>
-        Current limitations
-    </h2>
-
+            </section>
+        <section id="limitations" class="data-panel limitations-panel">
+            <div class="section-heading"><h2>Current limitations</h2><span>How to interpret these numbers</span></div>
 
     <div class="notice">
 
@@ -678,7 +564,7 @@
 
     </div>
 
-</div>
-
+        </section>
+    </main>
 </body>
 </html>

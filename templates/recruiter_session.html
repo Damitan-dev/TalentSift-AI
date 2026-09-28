@@ -1,82 +1,62 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0"
-    >
-
-    <title>
-        TalentSift Candidate Review
-    </title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TalentSift Candidate Review</title>
+    <link rel="stylesheet" href="/styles.css?v=6">
 </head>
-<body>
+<body class="ts-session">
+    <header class="site-header">
+        <div class="site-header__inner">
+            <div class="brand" aria-label="TalentSift"><span class="brand-mark" aria-hidden="true"></span><span>TalentSift</span></div>
+            <nav class="header-nav" aria-label="Recruiter pages">
+                <a href="/recruiter/jobs">Jobs</a>
+                <a href="/recruiter/job/{{ detail.job_id }}">Dashboard</a>
+                <a href="/recruiter/job/{{ detail.job_id }}/fairness">Fairness</a>
+            {% include 'recruiter_logout.html' %}
+            </nav>
+        </div>
+    </header>
+    <main class="page-shell">
+        <div class="page-hero review-hero">
+            <div>
+                <a class="back-link" href="/recruiter/job/{{ detail.job_id }}">← Back to leaderboard</a>
+                <span class="eyebrow">CANDIDATE REVIEW</span>
+                <h1>{{ detail.candidate.full_name or "Not provided" }}</h1>
+                <p>Job: <strong>{{ job_title or detail.job_id }}</strong></p>
+                {% if job_title %}<p class="muted">Job ID: {{ detail.job_id }}</p>{% endif %}
+            </div>
+            <a class="outline-action" href="/recruiter/session/{{ detail.session_id }}/transcript.txt">Download full transcript</a>
+        </div>
+        <nav class="section-tabs" aria-label="Candidate review sections">
+            <a href="#overview">Overview</a>
+            <a href="#competencies">Competencies</a>
+            <a href="#transcript-view">Transcript</a>
+            <a href="#audio-recording">Audio</a>
+            <a href="#override">Recruiter override</a>
+        </nav>
+        <div id="overview" class="detail-grid">
+            <section class="detail-card">
+                <h2>Candidate</h2>
 
-    <p>
-        <a href="/recruiter/job/{{ detail.job_id }}">
-            ← Back to leaderboard
-        </a>
-    </p>
+    <p><span>Name</span><strong>{{ detail.candidate.full_name or "Not provided" }}</strong></p>
 
+    <p><span>Email</span><strong>{{ detail.candidate.email or "Not provided" }}</strong></p>
 
-    <h1>
-        Candidate Review
-    </h1>
+    <p><span>Candidate ID</span><strong>{{ detail.candidate.id }}</strong></p>
 
-    <p>
-    <a
-        href="/recruiter/session/{{ detail.session_id }}/transcript.txt"
-    >
-        Download full transcript
-    </a>
-</p>
+            </section>
+            <section class="detail-card">
+                <h2>Interview</h2>
 
-    <h2>
-        Candidate
-    </h2>
+    <p><span>Status</span><strong class="status-badge status-{{ detail.interview.status }}">{{ detail.interview.status }}</strong></p>
 
-    <p>
-        Name:
-        {{ detail.candidate.full_name or "Not provided" }}
-    </p>
+    <p><span>Language</span><strong>{{ detail.interview.language }}</strong></p>
 
-    <p>
-        Email:
-        {{ detail.candidate.email or "Not provided" }}
-    </p>
+    <p><span>Started</span><strong>{{ detail.interview.started_at or "—" }}</strong></p>
 
-    <p>
-        Candidate ID:
-        {{ detail.candidate.id }}
-    </p>
-
-
-    <h2>
-        Interview
-    </h2>
-
-    <p>
-        Status:
-        {{ detail.interview.status }}
-    </p>
-
-    <p>
-        Language:
-        {{ detail.interview.language }}
-    </p>
-
-    <p>
-        Started:
-        {{ detail.interview.started_at or "—" }}
-    </p>
-
-    <p>
-        Ended:
-        {{ detail.interview.ended_at or "—" }}
-    </p>
-
+    <p><span>Ended</span><strong>{{ detail.interview.ended_at or "—" }}</strong></p>
 
     {% if detail.interview.failure_reason %}
 
@@ -87,46 +67,31 @@
 
     {% endif %}
 
-
-    <h2>
-        Assessment
-    </h2>
-
+            </section>
+        </div>
+        <section class="data-panel assessment-panel">
+            <div class="section-heading"><h2>Assessment</h2><span>AI and effective ranking scores</span></div>
+            <div class="score-grid">
 
     {% if detail.assessment.available %}
 
-        <p>
-            Original AI overall:
-
-            {% if detail.assessment.ai_overall is not none %}
+        <p><span>Original AI overall</span><strong>{% if detail.assessment.ai_overall is not none %}
                 {{ detail.assessment.ai_overall }} / 5
             {% else %}
                 Not available
-            {% endif %}
-        </p>
+            {% endif %}</strong></p>
 
-
-        <p>
-            Recruiter override:
-
-            {% if detail.assessment.recruiter_override is not none %}
+        <p><span>Recruiter override</span><strong>{% if detail.assessment.recruiter_override is not none %}
                 {{ detail.assessment.recruiter_override }} / 5
             {% else %}
                 None
-            {% endif %}
-        </p>
+            {% endif %}</strong></p>
 
-
-        <p>
-            Effective ranking score:
-
-            {% if detail.assessment.effective_score is not none %}
+        <p><span>Effective ranking score</span><strong>{% if detail.assessment.effective_score is not none %}
                 {{ detail.assessment.effective_score }} / 5
             {% else %}
                 Not available
-            {% endif %}
-        </p>
-
+            {% endif %}</strong></p>
 
         {% if detail.assessment.overridden %}
 
@@ -158,12 +123,10 @@
         </p>
 
     {% endif %}
-
-    <hr>
-
-<h2>
-    Recruiter Override
-</h2>
+            </div>
+        </section>
+        <section id="override" class="data-panel override-panel">
+            <div class="section-heading"><h2>Recruiter Override</h2><span>Changes are recorded for review</span></div>
 
 <p>
     The original AI overall score is preserved.
@@ -174,6 +137,7 @@
     method="post"
     action="/recruiter/session/{{ detail.session_id }}/override"
 >
+<input type="hidden" name="csrf_token" value="{{ request.state.access.csrf }}">
 
     <p>
         <label for="score">
@@ -192,7 +156,6 @@
         >
     </p>
 
-
     <p>
         <label for="reason">
             Reason:
@@ -208,7 +171,6 @@
             required
         >{% if detail.assessment.override_reason %}{{ detail.assessment.override_reason }}{% endif %}</textarea>
     </p>
-
 
     <button type="submit">
         Save override
@@ -238,6 +200,7 @@
         method="post"
         action="/recruiter/session/{{ detail.session_id }}/restore-ai"
     >
+<input type="hidden" name="csrf_token" value="{{ request.state.access.csrf }}">
 
         <p>
             <label for="restore_reason">
@@ -262,8 +225,6 @@
     </form>
 
 {% endif %}
-
-
 
 {% if detail.assessment.override_history %}
 
@@ -319,10 +280,9 @@
 
 {% endif %}
 
-    <h2>
-        Competency Breakdown
-    </h2>
-
+            </section>
+        <section id="competencies" class="data-panel competency-panel">
+            <div class="section-heading"><h2>Competency Breakdown</h2><span>Scores, justifications and interview evidence</span></div>
 
     {% if detail.competencies %}
 
@@ -334,12 +294,10 @@
                 {{ competency.name }}
             </h3>
 
-
             <p>
                 Status:
                 {{ competency.status }}
             </p>
-
 
             <p>
                 Score:
@@ -351,17 +309,14 @@
                 {% endif %}
             </p>
 
-
             <p>
                 <strong>Justification:</strong>
                 {{ competency.justification }}
             </p>
 
-
             <p>
                 <strong>Evidence:</strong>
             </p>
-
 
             {% if competency.evidence %}
 
@@ -395,11 +350,26 @@
 
     {% endif %}
 
-
-    <h2>
-        Full Interview Transcript
-    </h2>
-
+            </section>
+        <section id="audio-recording" class="data-panel recording-panel">
+            <div class="section-heading"><h2>Interview Audio</h2><span>Candidate and Bianca</span></div>
+            {% if recording.available %}
+                {% if recording.status != "saved" %}
+                <p class="recording-note">This recording is in progress or was interrupted. The received audio has been kept; playback may be incomplete.</p>
+                {% endif %}
+                <audio controls preload="none" aria-label="Interview audio recording">
+                    <source src="/recruiter/session/{{ detail.session_id }}/audio" type="{{ recording.mime_type }}">
+                    Your browser cannot play this recording. Use the download link below.
+                </audio>
+                <p><a class="outline-action" href="/recruiter/session/{{ detail.session_id }}/audio?download=true">Download audio ({{ recording.size_mb }} MB)</a></p>
+            {% elif recording.status == "not_requested" %}
+                <p>No audio recording was requested for this interview. Earlier interviews only have transcripts.</p>
+            {% else %}
+                <p>Audio recording was requested, but no audio has been received yet. Recording may not have started or may have been unavailable.</p>
+            {% endif %}
+        </section>
+        <section id="transcript-view" class="data-panel transcript-panel">
+            <div class="section-heading"><h2>Full Interview Transcript</h2><span>Bianca and candidate responses</span></div>
 
     {% if detail.transcript %}
 
@@ -439,6 +409,7 @@
 
     {% endif %}
 
+        </section>
+    </main>
 </body>
-
 </html>

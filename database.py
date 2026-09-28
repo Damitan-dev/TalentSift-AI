@@ -12,6 +12,7 @@ from datetime import datetime
 
 from models import (
     Candidate,
+    JobListing,
     Session,
     TranscriptTurn,
 )
@@ -75,6 +76,19 @@ def initialize_database():
 
 
     try:
+
+        # -------------------------------------------------
+        # JOBS TABLE: titles and IDs survive server restarts.
+        # -------------------------------------------------
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS jobs (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
 
         # -------------------------------------------------
         # CANDIDATES TABLE
@@ -189,6 +203,57 @@ def initialize_database():
 
         # Always close the database connection,
         # even if something goes wrong.
+        connection.close()
+
+
+def save_job(job: JobListing) -> None:
+    """Persist a new job with its automatically generated ID."""
+    connection = get_connection()
+    try:
+        connection.execute(
+            "INSERT INTO jobs (id, title, created_at) VALUES (?, ?, ?)",
+            (job.id, job.title, job.created_at.isoformat()),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def load_job(job_id: str) -> JobListing:
+    """Look up a job by the ID used in interview links and sessions."""
+    connection = get_connection()
+    try:
+        row = connection.execute(
+            "SELECT id, title, created_at FROM jobs WHERE id = ?",
+            (job_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"Job not found: {job_id}")
+        return JobListing(
+            id=row["id"],
+            title=row["title"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+        )
+    finally:
+        connection.close()
+
+
+def list_jobs() -> list[JobListing]:
+    """Show recruiter-created jobs, newest first."""
+    connection = get_connection()
+    try:
+        rows = connection.execute(
+            "SELECT id, title, created_at FROM jobs ORDER BY created_at DESC"
+        ).fetchall()
+        return [
+            JobListing(
+                id=row["id"],
+                title=row["title"],
+                created_at=datetime.fromisoformat(row["created_at"]),
+            )
+            for row in rows
+        ]
+    finally:
         connection.close()
 
 
@@ -490,13 +555,8 @@ def list_completed_sessions_for_job(
         #
         # Where does job_id come from?
         #
-        # Later the recruiter URL will be:
-        #
-        # /recruiter/job/{job_id}
-        #
-        # Example:
-        #
-        # /recruiter/job/job-test-001
+        # A recruiter dashboard uses /recruiter/job/{job_id}.
+        # Job IDs are generated when a job is created.
         rows = connection.execute(
             """
             SELECT id
