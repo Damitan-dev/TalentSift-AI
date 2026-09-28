@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TalentSift Jobs</title>
+    <link rel="stylesheet" href="/styles.css?v=7">
+</head>
+<body class="ts-jobs">
+    <header class="site-header">
+        <div class="site-header__inner">
+            <div class="brand" aria-label="TalentSift"><span class="brand-mark" aria-hidden="true"></span><span>TalentSift</span></div>
+            <nav class="header-nav" aria-label="Recruiter pages">
+                <span aria-current="page">Jobs</span>
+            {% include 'recruiter_logout.html' %}
+            </nav>
+        </div>
+    </header>
+    <main class="page-shell">
+        <div class="page-hero">
+            <div>
+                <span class="eyebrow">RECRUITER WORKSPACE</span>
+                <h1>Jobs</h1>
+                <p>Create a job, then invite each candidate from its dashboard.</p>
+            </div>
+        </div>
+
+        {% include 'recruiter_usage.html' %}
+        <section class="data-panel" aria-labelledby="create-heading">
+            <div class="section-heading"><h2 id="create-heading">Create a job</h2></div>
+            <p class="notice">This MVP interview and assessment are designed for backend and Python engineering roles. The title changes the job shown to candidates and recruiters; interview questions and scoring criteria stay the same.</p>
+            <form class="job-form" method="post" action="/recruiter/jobs">
+<input type="hidden" name="csrf_token" value="{{ request.state.access.csrf }}">
+                <label for="job-title">Job title</label>
+                <div class="job-form__actions">
+                    <input id="job-title" name="title" type="text" maxlength="120" required placeholder="e.g. Software Engineer">
+                    <button type="submit">Create job</button>
+                </div>
+            </form>
+        </section>
+
+        <section class="data-panel" aria-labelledby="existing-heading">
+            <div class="section-heading"><h2 id="existing-heading">Created jobs</h2><span>{{ jobs | length }} total</span></div>
+            {% if jobs %}
+            <ul class="job-list">
+                {% for job in jobs %}
+                <li>
+                    <div><strong>{{ job.title }}</strong><small>Job ID: {{ job.id }}</small></div>
+                    <a class="outline-action" href="/recruiter/job/{{ job.id }}">View dashboard →</a>
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p class="muted">No jobs yet. Create one above to start inviting candidates.</p>
+            {% endif %}
+        </section>
+    </main>
+</body>
+</html>

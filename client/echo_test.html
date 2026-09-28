@@ -1,0 +1,60 @@
+<!doctype html>
+<button id="start">Start echo</button>
+<script>
+const SAMPLE_RATE = 16000;   // what realtime engines expect and also the number of snapshot per second
+let ws;
+ 
+ // to ask permission from user before recording and also async because user s might take time deciding.
+document.getElementById("start").onclick = async () => {
+  ws = new WebSocket("ws://localhost:8765"); //Creates live connection
+  ws.binaryType = "arraybuffer"; //Data representation using raw bytes
+  ws.onmessage = (e) => playChunk(e.data);       // wired up on Thursday,An event programming to tell Javascript that whenever something arrives call playChunk()
+ 
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); //"Ask the browser for permission to access the user's microphone. Wait until the user makes a decision. If permission is granted, the browser opens the microphone and returns a live stream of audio samples, which I store in stream so the rest of my application can process it."
+  const ctx    = new AudioContext({ sampleRate: SAMPLE_RATE }); //Creating the audio engine in charge of managing any audio object
+  const source = ctx.createMediaStreamSource(stream); //Represent microphone inside the AudioContext
+  const proc   = ctx.createScriptProcessor(1024, 1, 1);  // ~64ms; fine for a sandbox
+ 
+  proc.onaudioprocess = (e) => {
+    const float32 = e.inputBuffer.getChannelData(0);  // floats, -1.0 .. 1.0
+    const pcm16   = floatTo16BitPCM(float32);
+    if (ws.readyState === WebSocket.OPEN) ws.send(pcm16);
+  };
+  source.connect(proc); proc.connect(ctx.destination);
+};
+ 
+// TODO #2 — THE FORMAT CONVERSION (the heart of the exercise)
+function floatTo16BitPCM(float32) {
+  const out = new Int16Array(float32.length);
+  for (let i = 0; i < float32.length; i++) {
+    // a) clamp the sample into the range -1 .. 1 (Math.max / Math.min)
+    const sample = Math.max(-1,Math.min(1,float32[i]));
+    // b) scale to 16-bit integers: negative × 32768, positive × 32767
+    // out[i] = ...;
+    out[i] = sample < 0
+        ? sample * 32768
+        : sample * 32767;
+  }
+  return out.buffer;
+}
+
+let playCtx;
+function playChunk(arrayBuffer) {
+  if (!playCtx) playCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
+  const pcm16 = new Int16Array(arrayBuffer);
+ 
+  // TODO #3 — convert Int16 back to Float32 (-1..1): the inverse of TODO #2
+  const float32 = new Float32Array(pcm16.length);
+  // for (let i = 0; i < pcm16.length; i++) { float32[i] = ...; }
+  for (let i = 0; i< pcm16.length; i++) {
+    float32[i] = pcm16[i] / 32768;
+  }
+ 
+  const buf = playCtx.createBuffer(1, float32.length, SAMPLE_RATE);
+  buf.copyToChannel(float32, 0);
+  const src = playCtx.createBufferSource();
+  src.buffer = buf;
+  src.connect(playCtx.destination);
+  src.start();   // simple back-to-back playback — good enough for an echo
+}
+</script>

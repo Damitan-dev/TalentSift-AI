@@ -334,6 +334,7 @@ The current MVP uses:
 - SQLite for candidates, sessions, and transcripts
 - JSON files for scorecards
 - JSON storage for controlled fairness-test records
+- Audio files and recording metadata for interviews with recording consent
 
 Production deployment must use persistent storage for the configured
 `TALENTSIFT_DATA_DIR`.
@@ -343,6 +344,19 @@ in interview records being lost when the service restarts or redeploys.
 
 The local `data/` directory is excluded from Git so runtime recruitment data is
 not committed to the source repository.
+
+## Optional interview audio recording
+
+Candidates can opt in to saving the microphone and Bianca's playback together.
+Recordings stream to `data/recordings/<session-id>/` (or the configured
+`TALENTSIFT_DATA_DIR`) and are available from **Audio** on the recruiter session
+page. Completed recordings can be played or downloaded; partial recordings are
+labelled incomplete. Earlier interviews cannot acquire audio retroactively.
+
+See [the audio saving setup guide](docs/audio_saving.md) for the changed files,
+consent flow, storage details, and microphone checks. The interview stream and
+live-caption transcription configuration are unchanged. Deployment is paused
+while this feature is tested with a real microphone.
 
 ## Current MVP Limitations
 

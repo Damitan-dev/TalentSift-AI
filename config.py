@@ -1,5 +1,9 @@
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Resolve the data location before database and recording modules import it.
+load_dotenv()
 
 
 # ---------------------------------------------------------

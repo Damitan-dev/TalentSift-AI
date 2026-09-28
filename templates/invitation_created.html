@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en"><head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Invitation ready | TalentSift</title><link rel="stylesheet" href="/styles.css?v=7">
+</head><body class="ts-jobs">
+    <header class="site-header"><div class="site-header__inner">
+        <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>TalentSift</span></div>
+        <nav class="header-nav"><a href="/recruiter/jobs">Jobs</a>{% include 'recruiter_logout.html' %}</nav>
+    </div></header>
+    <main class="page-shell">
+        <section class="data-panel">
+            <span class="eyebrow">CANDIDATE INVITATION</span><h1>Ready for {{ candidate_name }}</h1>
+            <p>Send this personal link to {{ candidate_name }}. It permits one interview.</p>
+            <div class="job-share__actions">
+                <input id="invite-url" type="text" readonly aria-label="Personal interview link" value="{{ invite_url }}">
+                <button id="copy-invite" type="button">Copy link</button>
+            </div>
+            <p id="copy-status" role="status" aria-live="polite"></p>
+            <p class="muted">Copy the link before leaving this page. If you lose it, cancel this invitation and create another.</p>
+            <a class="outline-action" href="/recruiter/job/{{ job_id }}">Back to job</a>
+        </section>
+    </main>
+    <script>
+        const field = document.getElementById('invite-url');
+        document.getElementById('copy-invite').addEventListener('click', async () => {
+            try {
+                await navigator.clipboard.writeText(field.value);
+                document.getElementById('copy-status').textContent = 'Link copied. Send it to the candidate.';
+            } catch (_) {
+                field.select();
+                document.getElementById('copy-status').textContent = 'Link selected. Press Ctrl+C to copy.';
+            }
+        });
+    </script>
+</body></html>

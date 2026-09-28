@@ -1,367 +1,200 @@
 <!doctype html>
-
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
-
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0"
-    >
-
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TalentSift Interview</title>
+    <link rel="stylesheet" href="/styles.css?v=7">
 </head>
-
-<body>
-
-    <main>
-
-    <!-- ==========================================
-         WELCOME SCREEN
-    =========================================== -->
-
-    <section
-        id="welcome"
-        class="screen"
-    >
-
-        <h1>
-            TalentSift AI
-        </h1>
-
-        <h2>
-            Your interview is ready
-        </h2>
-
-        <p>
-            Bianca will guide you through your
-            voice interview.
-        </p>
-
-        <p>
-            Find a quiet place where you can answer
-            comfortably.
-        </p>
-
-        <button id="welcome-start">
-            Start
-        </button>
-
-    </section>
-
-
-    <!-- ==========================================
-         CONSENT SCREEN
-    =========================================== -->
-
-    <section
-        id="consent"
-        class="screen"
-        hidden
-    >
-
-        <h2>
-            Before your interview
-        </h2>
-
-        <p>
-            TalentSift uses an AI interviewer to conduct
-            this interview.
-        </p>
-
-        <p>
-            Your voice will be processed during the
-            interview to create a transcript. Your
-            responses may then be evaluated against
-            job-related criteria using AI-assisted
-            assessment.
-        </p>
-
-        <p>
-            Your interview transcript and related
-            interview data will be stored so the hiring
-            team can review the interview.
-        </p>
-
-        <p>
-            TalentSift supports the hiring process.
-            The hiring team makes the final hiring
-            decision.
-        </p>
-
-        <p>
-            The retention period for interview data is
-            still being finalized for this development
-            version of TalentSift.
-        </p>
-
-
-        <label for="language">
-            Interview language
-        </label>
-
-        <select id="language">
-
-            <option value="en">
-                English
-            </option>
-
-            <option value="fr">
-                Français
-            </option>
-
-        </select>
-
-
-        <div>
-
-            <label>
-
-                <input
-                    type="checkbox"
-                    id="consent-checkbox"
-                >
-
-                I have read this notice and consent
-                to continue.
-
-            </label>
-
+<body class="ts-candidate">
+    <header class="site-header">
+        <div class="site-header__inner">
+            <div class="brand" aria-label="TalentSift">
+                <span class="brand-mark" aria-hidden="true"></span>
+                <span>TalentSift</span>
+            </div>
+            <span class="header-context">Candidate interview</span>
         </div>
-
-
-        <p
-            id="consent-error"
-            hidden
-        >
-            Please give your consent before continuing.
-        </p>
-
-
-        <button id="consent-continue">
-            Continue
-        </button>
-
-    </section>
-
-
-    <!-- ==========================================
-         MICROPHONE SCREEN
-    =========================================== -->
-
-    <section
-        id="mic"
-        class="screen"
-        hidden
-    >
-
-        <h2>
-            Check your microphone
-        </h2>
-
-        <p>
-            Your interview session is ready.
-        </p>
-
-        <p>
-            Next, TalentSift needs permission to use
-            your microphone so Bianca can hear you.
-        </p>
-
-        <button id="enable-mic">
-            Enable microphone
-        </button>
-
-
-<div
-    id="mic-picker"
-    hidden
->
-
-    <p>
-        Choose the microphone you want to use.
-    </p>
-
-    <label for="mic-select">
-        Microphone
-    </label>
-
-    <select id="mic-select">
-    </select>
-
-    <button id="use-selected-mic">
-        Use selected microphone
-    </button>
-
-</div>
-
-        <div
-    id="mic-error"
-    hidden
->
-
-    <p>
-        We couldn't access your microphone.
-        Check your browser microphone permission
-        and try again.
-    </p>
-
-    <button id="retry-mic">
-        Try microphone again
-    </button>
-
-</div>
-
-    </section>
-
-
-    <!-- ==========================================
-         CONNECTING SCREEN
-    =========================================== -->
-
-    <section
-        id="connecting"
-        class="screen"
-        hidden
-    >
-
-        <h2>
-            Getting things ready…
-        </h2>
-
-        <p>
-            Connecting you to Bianca.
-        </p>
-
-    </section>
-
-
-    <!-- ==========================================
-         INTERVIEW SCREEN
-    =========================================== -->
-
-    <section
-        id="interview"
-        class="screen"
-        hidden
-    >
-
-        <h1>
-    TalentSift Interview
-</h1>
-
-
-<p id="status">
-    Not connected
-</p>
-
-
-<!-- ==========================================
-     INTERVIEW TIMER
-=========================================== -->
-
-<div id="interview-timer">
-
-    <strong>
-        Interview time
-    </strong>
-
-    <span id="time-remaining">
-        Waiting to start…
-    </span>
-
-</div>
-
-
-<h2>
-    Transcript
-</h2>
-        <div id="transcript"></div>
-
-
-                <!-- ==========================================
-             END INTERVIEW
-        =========================================== -->
-
-        <div id="interview-actions">
-
-            <button
-                id="end-interview"
-                type="button"
-            >
-                End interview
-            </button>
-
-        </div>
-
-    </section>
-
-
-    <!-- ==========================================
-         DONE SCREEN
-    =========================================== -->
-
-    <section
-        id="done"
-        class="screen"
-        hidden
-    >
-
-        <h2>
-            Thank you
-        </h2>
-
-        <p>
-            Your interview has been completed.
-        </p>
-
-        <p>
-            The hiring team will review your interview
-            as part of the recruitment process.
-        </p>
-
-        <p>
-            You can now close this page.
-        </p>
-
-    </section>
-
-        <!-- ==========================================
-         INTERVIEW ENDED EARLY
-    =========================================== -->
-
-    <section
-        id="ended-early"
-        class="screen"
-        hidden
-    >
-
-        <h2>
-            Interview ended
-        </h2>
-
-        <p>
-            You ended this interview before it was completed.
-        </p>
-
-        <p>
-            Your responses up to this point have been saved.
-        </p>
-
-        <p>
-            The hiring team can review the interview record.
-        </p>
-
-        <p>
-            You can now close this page.
-        </p>
-
-    </section>
-
-</main>
-
-
+    </header>
+
+    <main class="candidate-shell">
+        <!-- Each existing .screen is still controlled by the original show(state) function. -->
+        <section id="welcome" class="screen welcome-screen">
+            <div class="welcome-hero">
+                <span class="hero-mark" aria-hidden="true"><span class="brand-mark"></span></span>
+                <h1 id="candidate-welcome">TalentSift AI</h1>
+                <h2 id="candidate-job-title">Checking your interview link…</h2>
+                <p>Bianca will guide you through your voice interview.</p>
+                <p>Find a quiet place where you can answer comfortably.</p>
+                <p id="invitation-error" class="form-error" role="alert" hidden></p>
+                <p id="recruiter-setup-link" hidden>Recruiter? <a href="/recruiter/jobs">Sign in to manage interviews</a>.</p>
+                <button id="welcome-start" disabled>Start</button>
+            </div>
+            <div class="feature-grid" aria-label="What to expect">
+                <div class="feature-card">
+                    <span class="feature-icon" aria-hidden="true">01</span>
+                    <h3>Read the notice</h3>
+                    <p>Review how your voice and interview data are used.</p>
+                </div>
+                <div class="feature-card">
+                    <span class="feature-icon" aria-hidden="true">02</span>
+                    <h3>Choose a microphone</h3>
+                    <p>Give permission and select the device you want to use.</p>
+                </div>
+                <div class="feature-card">
+                    <span class="feature-icon" aria-hidden="true">03</span>
+                    <h3>Speak with Bianca</h3>
+                    <p>Your conversation is transcribed for the hiring team.</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="consent" class="screen stage-screen" hidden>
+            <div class="stepper" aria-label="Interview setup">
+                <span class="stepper__step is-current" aria-current="step">01 <span>Read terms</span></span>
+                <span class="stepper__step">02 <span>Microphone</span></span>
+                <span class="stepper__step">03 <span>Interview</span></span>
+            </div>
+            <div class="stage-layout">
+                <div class="stage-main">
+                    <span class="eyebrow">BEFORE YOU BEGIN</span>
+                    <h2>Before your interview</h2>
+                    <p>TalentSift uses an AI interviewer to conduct this interview.</p>
+                    <div class="notice-panel">
+                        <p>Your voice will be processed during the interview to create a transcript. Your responses may then be evaluated against structured interview criteria using AI-assisted assessment.</p>
+                        <p>Your interview transcript and related interview data will be stored so the hiring team can review the interview. If you choose audio recording below, we will also save your microphone audio and Bianca’s voice for the hiring team to replay.</p>
+                        <p>TalentSift supports the hiring process. The hiring team makes the final hiring decision.</p>
+                        <p>The retention period for interview data is still being finalized for this development version of TalentSift.</p>
+                    </div>
+                    <div class="setup-form">
+                        <label for="candidate-name">Your full name</label>
+                        <input id="candidate-name" type="text" autocomplete="off" readonly aria-describedby="candidate-name-help">
+                        <p id="candidate-name-help" class="muted">Your name was supplied by the recruiter. If it is wrong, contact them before continuing.</p>
+                        <label for="language">Interview language</label>
+                        <select id="language">
+                            <option value="en">English</option>
+                            <option value="fr">Français</option>
+                        </select>
+                        <div class="consent-choice">
+                            <label><input type="checkbox" id="consent-checkbox"> I have read this notice and consent to continue.</label>
+                        </div>
+                        <div class="consent-choice">
+                            <label><input type="checkbox" id="record-audio-checkbox"> I also agree to save this interview’s audio for the hiring team to replay (optional).</label>
+                        </div>
+                        <p id="consent-error" class="form-error" hidden>Please give your consent before continuing.</p>
+                        <button id="consent-continue">Continue</button>
+                    </div>
+                </div>
+                <aside class="stage-aside" aria-label="Interview setup information">
+                    <span class="aside-symbol" aria-hidden="true">✓</span>
+                    <h3>What happens next</h3>
+                    <p>After you continue, you can enable and select your microphone before connecting to Bianca.</p>
+                </aside>
+            </div>
+        </section>
+
+        <section id="mic" class="screen stage-screen" hidden>
+            <div class="stepper" aria-label="Interview setup">
+                <span class="stepper__step is-complete">01 <span>Read terms</span></span>
+                <span class="stepper__step is-current" aria-current="step">02 <span>Microphone</span></span>
+                <span class="stepper__step">03 <span>Interview</span></span>
+            </div>
+            <div class="stage-layout">
+                <div class="stage-main">
+                    <span class="eyebrow">AUDIO SETUP</span>
+                    <h2>Check your microphone</h2>
+                    <p>Your interview session is ready.</p>
+                    <p>Next, TalentSift needs permission to use your microphone so Bianca can hear you.</p>
+                    <button id="enable-mic">Enable microphone</button>
+                    <div id="mic-picker" class="setup-form mic-picker" hidden>
+                        <p>Choose the microphone you want to use.</p>
+                        <label for="mic-select">Microphone</label>
+                        <select id="mic-select"></select>
+                        <button id="use-selected-mic">Use selected microphone</button>
+                    </div>
+                    <div id="mic-error" class="form-error" hidden>
+                        <p>We couldn't access your microphone. Check your browser microphone permission and try again.</p>
+                        <button id="retry-mic">Try microphone again</button>
+                    </div>
+                </div>
+                <aside class="stage-aside" aria-label="Microphone information">
+                    <span class="mic-symbol" aria-hidden="true"></span>
+                    <h3>Before you connect</h3>
+                    <p>Find a quiet place where you can answer comfortably.</p>
+                </aside>
+            </div>
+        </section>
+
+        <section id="connecting" class="screen result-screen" hidden>
+            <div class="loading-ring" aria-hidden="true"></div>
+            <h2>Getting things ready…</h2>
+            <p>Connecting you to Bianca.</p>
+        </section>
+
+        <section id="interview" class="screen interview-screen" hidden>
+            <div class="interview-heading">
+                <div>
+                    <span class="eyebrow">LIVE VOICE INTERVIEW</span>
+                    <h1 id="interview-job-title">TalentSift Interview</h1>
+                </div>
+                <p id="status" role="status" aria-live="polite">Not connected</p>
+            </div>
+            <div id="interview-error" class="form-error" role="alert" hidden>
+                <p id="interview-error-message"></p>
+                <button id="restart-interview" type="button">Reload page</button>
+            </div>
+            <div class="interview-accent" aria-hidden="true"></div>
+            <div class="interview-layout">
+                <div class="conversation-card">
+                    <div class="voice-indicator" aria-hidden="true">
+                        <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+                    </div>
+                    <div class="conversation-heading">
+                        <h2>Transcript</h2>
+                        <span>Bianca and your responses</span>
+                    </div>
+                    <div id="transcript"></div>
+                </div>
+                <aside class="interview-sidebar">
+                    <div id="interview-timer" class="sidebar-panel">
+                        <strong>Interview time</strong>
+                        <span id="time-remaining">Waiting to start…</span>
+                    </div>
+                    <div class="sidebar-panel guidance-panel">
+                        <h3>During the interview</h3>
+                        <p>Speak clearly and take a moment to think before answering.</p>
+                    </div>
+                    <div id="interview-actions">
+                        <button id="end-interview" type="button">End interview</button>
+                    </div>
+                </aside>
+            </div>
+        </section>
+
+        <section id="done" class="screen result-screen" hidden>
+            <div class="result-icon is-success" aria-hidden="true">✓</div>
+            <h2>Thank you</h2>
+            <p>Your interview has been completed.</p>
+            <div class="result-message">
+                <p>The hiring team will review your interview as part of the recruitment process.</p>
+                <p>You can now close this page.</p>
+            </div>
+        </section>
+
+        <section id="ended-early" class="screen result-screen" hidden>
+            <div class="result-icon is-warning" aria-hidden="true">!</div>
+            <h2>Interview ended</h2>
+            <p>You ended this interview before it was completed.</p>
+            <div class="result-message">
+                <p>Your responses up to this point have been saved.</p>
+                <p>The hiring team can review the interview record.</p>
+                <p>You can now close this page.</p>
+            </div>
+        </section>
+        <p id="recording-status" class="recording-status" role="status" aria-live="polite" hidden></p>
+    </main>
+
+    <script src="/audio-recorder.js?v=2"></script>
     <script>
 
 
@@ -750,6 +583,11 @@ micStream =
 //
 // Now connect this real interview session
 // to FastAPI through WebSocket.
+// Share the existing audio clock so the recording includes only Bianca's
+// actual playback, including pauses and interruption fades.
+playCtx = captureCtx;
+await captureCtx.resume();
+await prepareOptionalRecording();
 connectInterviewWebSocket();
 
     } catch (error) {
@@ -932,6 +770,7 @@ document.getElementById(
     "welcome-start"
 ).onclick = () => {
 
+    if (!jobId) return;
     show(
         "consent"
     );
@@ -976,6 +815,8 @@ document.getElementById(
 
     if (!consentGiven) {
 
+        document.getElementById("consent-error").textContent =
+            "Please give your consent before continuing.";
         document.getElementById(
             "consent-error"
         ).hidden = false;
@@ -1010,6 +851,15 @@ document.getElementById(
             "language"
         ).value;
 
+    if (!candidateCsrf || !jobId) {
+        const error = document.getElementById("consent-error");
+        error.textContent = "This interview link is invalid. Ask the recruiter for a new link.";
+        error.hidden = false;
+        return;
+    }
+
+    const continueButton = document.getElementById("consent-continue");
+    continueButton.disabled = true;
 
     // ---------------------------------------------
     // SEND DATA TO FASTAPI
@@ -1024,26 +874,20 @@ document.getElementById(
                     method: "POST",
 
                     headers: {
-                        "Content-Type":
-                            "application/json"
+                        "Content-Type": "application/json",
+                        "X-CSRF-Token": candidateCsrf
                     },
 
                     body: JSON.stringify(
                         {
-                            // Temporary dev context.
-                            candidate_id:
-                                candidateId,
-
-                            job_id:
-                                jobId,
-
                             // From candidate's language picker.
                             language:
                                 language,
 
                             // From candidate's checkbox.
                             consent:
-                                consentGiven
+                                consentGiven,
+                            record_audio: document.getElementById("record-audio-checkbox").checked
                         }
                     )
                 }
@@ -1069,8 +913,9 @@ document.getElementById(
             document.getElementById(
                 "consent-error"
             ).textContent =
-                errorData.detail
-                || "We couldn't prepare your interview.";
+                typeof errorData.detail === "string"
+                    ? errorData.detail
+                    : "We couldn't prepare your interview.";
 
 
             document.getElementById(
@@ -1104,6 +949,10 @@ document.getElementById(
         // interview session ID.
         sessionId =
             data.session_id;
+        recordingToken = data.recording_token || null;
+        if (data.recording_error) {
+            recordingStatus("Audio storage is unavailable. Your interview can continue without a recording.");
+        }
 
 
         console.log(
@@ -1140,6 +989,8 @@ document.getElementById(
         document.getElementById(
             "consent-error"
         ).hidden = false;
+    } finally {
+        continueButton.disabled = false;
     }
 };
 
@@ -1180,6 +1031,40 @@ document.getElementById(
 
 // The real microphone stream returned by Chrome.
 let micStream = null;
+let recordingToken = null;
+let interviewRecorder = null;
+
+function recordingStatus(message) {
+    const status = document.getElementById("recording-status");
+    status.textContent = message;
+    status.hidden = false;
+}
+
+async function prepareOptionalRecording() {
+    if (!recordingToken) return;
+    const token = recordingToken;
+    recordingToken = null;
+    const unavailable = "Audio recording is unavailable. Your interview will continue without saved audio.";
+
+    // The recorder script is optional. A missing file must not be reported
+    // as denied microphone permission or prevent the interview connecting.
+    if (typeof window.InterviewAudioRecorder !== "function") {
+        console.warn("Recorder script did not load. Check /audio-recorder.js and the script tag before the main interview script.");
+        recordingStatus(unavailable);
+        return;
+    }
+    try {
+        interviewRecorder = new window.InterviewAudioRecorder({
+            context: captureCtx, microphone: micSource, onStatus: recordingStatus
+        });
+        await interviewRecorder.connect(sessionId, token);
+    } catch (error) {
+        console.error("Audio recording setup failed:", error);
+        try { interviewRecorder?.fail?.(unavailable); } catch (_) { /* optional cleanup */ }
+        interviewRecorder = null;
+        recordingStatus(unavailable);
+    }
+}
 
 
 // AudioContext used to process the candidate's
@@ -1200,30 +1085,12 @@ let micProcessor = null;
 
 
 // -----------------------------------------------------
-// DEVELOPMENT-ONLY INTERVIEW CONTEXT
+// JOB CONTEXT FROM THE RECRUITER'S INTERVIEW LINK
 // -----------------------------------------------------
-//
-// Where did these values come from?
-//
-// candidate ID:
-// This is the Candidate row we already created
-// in data/talentsift.db during our SQLite test.
-//
-// job ID:
-// We are still using a temporary job ID because
-// the invitation/job-link workflow has not been
-// connected yet.
-//
-// LATER:
-// These will come from the candidate's secure
-// interview invitation, NOT hardcoded JavaScript.
-
-const candidateId =
-    "ab61e9f6-6903-4688-ad1f-8a5f737009d6";
-
-
-const jobId =
-    "job-test-001";
+// Server-side JobListing and Candidate models generate IDs.
+// The server resolves the invitation and supplies the candidate identity.
+let jobId = null;
+let candidateCsrf = null;
 
         // -----------------------------------------------------
         // BIANCA PLAYBACK STATE
@@ -1300,6 +1167,7 @@ const jobId =
         // reject any late audio packets belonging to it.
         const interruptedBiancaItemIds =
             new Set();
+        const pendingBiancaInterruptions = new Map();
 
 
 
@@ -1476,6 +1344,28 @@ const jobId =
         // =====================================================
 // CONNECT REAL INTERVIEW SESSION TO FASTAPI
 // =====================================================
+let interviewFailed = false;
+let interviewCompleted = false;
+
+function showInterviewConnectionError(message) {
+    if (interviewFailed || interviewCompleted || interviewEndedEarly) return;
+    interviewFailed = true;
+    stopInterviewCountdown();
+    micStream?.getTracks().forEach(track => track.stop());
+    for (const source of activeBiancaSources.keys()) {
+        try { source.stop(); } catch (_) { /* Already stopped. */ }
+    }
+    activeBiancaSources.clear();
+    if (interviewerCaptionTimer) clearInterval(interviewerCaptionTimer);
+    interviewerCaptionTimer = null;
+    void interviewRecorder?.finish(false);
+    document.getElementById("status").textContent = "Interview stopped";
+    document.getElementById("interview-error-message").textContent = message;
+    document.getElementById("interview-error").hidden = false;
+    document.getElementById("end-interview").disabled = true;
+    document.getElementById("restart-interview").onclick = () => window.location.reload();
+}
+
 
 function connectInterviewWebSocket() {
 
@@ -1617,7 +1507,15 @@ function connectInterviewWebSocket() {
     // STATUS
     // -------------------------------------------------
 
+    if (msg.type === "interview_error") {
+        showInterviewConnectionError(msg.message || "The interview stopped. Please contact the recruiter for a new invitation.");
+        return;
+    }
+    // Late packets must not change a failed session back to listening.
+    if (interviewFailed) return;
+
     if (msg.type === "status") {
+        if (msg.value === "engine_ready") interviewRecorder?.start();
 
         document.getElementById(
             "status"
@@ -1913,9 +1811,12 @@ function connectInterviewWebSocket() {
         msg.type === "interview_complete"
     ) {
 
+        interviewCompleted = true;
+
         console.log(
             "✅ Interview completed"
         );
+        void interviewRecorder?.finish(true);
 
         // Stop the visible interview clock.
         stopInterviewCountdown();
@@ -2011,6 +1912,7 @@ function connectInterviewWebSocket() {
 
 
         activeBiancaSources.clear();
+        void interviewRecorder?.finish(true);
 
 
         if (playCtx) {
@@ -2193,6 +2095,27 @@ function connectInterviewWebSocket() {
     // =================================================
     // FINAL TRANSCRIPT
     // =================================================
+
+    else if (
+        msg.type === "transcript_retract"
+        && msg.item_id
+    ) {
+        // Live captions are provisional. If the authoritative
+        // interview transcription is empty, remove that preview.
+        const transcript = document.getElementById("transcript");
+        for (const element of transcript.querySelectorAll(
+            ".candidate[data-item-id]"
+        )) {
+            if (element.dataset.itemId === msg.item_id) {
+                element.remove();
+            }
+        }
+        if (liveCandidateItemId === msg.item_id) {
+            liveCandidateItemId = null;
+            liveCandidateText = "";
+            liveCandidateElement = null;
+        }
+    }
 
     else if (msg.type === "transcript") {
 
@@ -2403,6 +2326,18 @@ function connectInterviewWebSocket() {
             // -------------------------------------------------
 
             ws.onclose = (event) => {
+                if (!interviewCompleted && !interviewEndedEarly && !interviewFailed) {
+                    showInterviewConnectionError("The interview connection was lost. Contact the recruiter for a new invitation.");
+                }
+
+                // Finalize any received audio after a lost interview connection.
+                // A separate recording connection can still save its final chunk.
+                for (const source of activeBiancaSources.keys()) {
+                    try { source.stop(); } catch (_) { /* already stopped */ }
+                }
+                activeBiancaSources.clear();
+                void interviewRecorder?.finish(false);
+                micStream?.getTracks().forEach(track => track.stop());
 
                 console.log(
                     "TalentSift WebSocket closed",
@@ -2413,10 +2348,9 @@ function connectInterviewWebSocket() {
                     }
                 );
 
-                document.getElementById(
-                    "status"
-                ).textContent =
-                    "Disconnected";
+                if (!interviewFailed && !interviewCompleted && !interviewEndedEarly) {
+                    document.getElementById("status").textContent = "Disconnected";
+                }
             };
 
 
@@ -2591,298 +2525,57 @@ function connectInterviewWebSocket() {
         // PLAY ONE BIANCA PCM16 AUDIO CHUNK
         // -----------------------------------------------------
 
-function playChunk(
-    arrayBuffer,
-    itemId,
-    contentIndex
-) {
-
-    // -------------------------------------------------
-    // CREATE PLAYBACK ENGINE
-    // -------------------------------------------------
-
-    if (!playCtx) {
-
-        playCtx =
-            new AudioContext({
-                sampleRate: SAMPLE_RATE
-            });
-    }
-
-
-    // -------------------------------------------------
-    // CREATE BIANCA VOLUME CONTROL
-    // -------------------------------------------------
-
+function playChunk(arrayBuffer, itemId, contentIndex) {
+    if (!playCtx) playCtx = new AudioContext({sampleRate: SAMPLE_RATE});
     if (!biancaGainNode) {
-
-        biancaGainNode =
-            playCtx.createGain();
-
-
-        biancaGainNode.gain.value =
-            1;
-
-
-        biancaGainNode.connect(
-            playCtx.destination
-        );
+        biancaGainNode = playCtx.createGain();
+        biancaGainNode.gain.value = 1;
+        biancaGainNode.connect(playCtx.destination);
+        interviewRecorder?.addInterviewer(biancaGainNode);
     }
+    if (itemId && interruptedBiancaItemIds.has(itemId)) return;
 
-
-    // If THIS specific Bianca item was already
-    // interrupted, never allow late network packets
-    // from it back into the playback queue.
-    if (
-        itemId
-        && interruptedBiancaItemIds.has(
-            itemId
-        )
-    ) {
-
-        console.log(
-            "⏭️ Ignoring late Bianca audio:",
-            itemId
-        );
-
-        return;
-    }
-
-
-    // -------------------------------------------------
-    // PCM16 -> FLOAT32
-    // -------------------------------------------------
-
-    const pcm16 =
-        new Int16Array(
-            arrayBuffer
-        );
-
-
-    const float32 =
-        new Float32Array(
-            pcm16.length
-        );
-
-
-    for (
-        let i = 0;
-        i < pcm16.length;
-        i++
-    ) {
-
-        float32[i] =
-            pcm16[i] / 32768;
-    }
-
-
-    // -------------------------------------------------
-    // CREATE WEB AUDIO BUFFER
-    // -------------------------------------------------
-
-    const audioBuffer =
-        playCtx.createBuffer(
-            1,
-            float32.length,
-            SAMPLE_RATE
-        );
-
-
-    audioBuffer.copyToChannel(
-        float32,
-        0
-    );
-
-
-    // -------------------------------------------------
-    // CREATE PLAYABLE SOURCE
-    // -------------------------------------------------
-
-    const source =
-        playCtx.createBufferSource();
-
-
-    source.buffer =
-        audioBuffer;
-
-
-    source.connect(
-        biancaGainNode
-    );
-
-
-    activeBiancaSources.set(
-        source,
-        itemId
-    );
-
-
-    source.onended = () => {
-
-        activeBiancaSources.delete(
-            source
-        );
-    };
-
-
-    // -------------------------------------------------
-    // DETERMINE WHEN THIS CHUNK WILL PLAY
-    // -------------------------------------------------
-
-    const startTime =
-        Math.max(
-            playCtx.currentTime,
-            nextPlayTime
-        );
-
-
-    // -------------------------------------------------
-    // NEW BIANCA ITEM?
-    // -------------------------------------------------
-
-    // The first audio chunk belonging to a new
-    // assistant item establishes that item's
-    // playback start time.
-    if (
-        currentBiancaItemId !== itemId
-    ) {
-        
-                const previousBiancaItemId =
-            currentBiancaItemId;
-
-
-        // ---------------------------------------------
-        // WAS THE PREVIOUS ITEM INTERRUPTED?
-        // ---------------------------------------------
-        //
-        // If yes, remove only audio belonging to that
-        // old item before allowing this new Bianca item
-        // to begin.
-        //
-        // Never stop audio belonging to the new item.
-
-        if (
-            previousBiancaItemId
-            && interruptedBiancaItemIds.has(
-                previousBiancaItemId
-            )
-        ) {
-
-            for (
-                const [
-                    activeSource,
-                    activeItemId
-                ]
-                of activeBiancaSources
-            ) {
-
-                if (
-                    activeItemId
-                    === previousBiancaItemId
-                ) {
-
-                    try {
-
-                        activeSource.stop();
-
-                    } catch (error) {
-
-                        // Already stopped.
-                    }
-                }
+    const isNewItem = currentBiancaItemId !== itemId;
+    const previousItem = currentBiancaItemId;
+    if (isNewItem && previousItem && interruptedBiancaItemIds.has(previousItem)) {
+        // Clear the discarded queue BEFORE computing this chunk's start time.
+        for (const [source, sourceItem] of activeBiancaSources) {
+            if (sourceItem === previousItem) {
+                try { source.stop(); } catch (error) { /* Already stopped. */ }
+                activeBiancaSources.delete(source);
             }
-
-
-            // The interrupted item's future queue
-            // should no longer delay this new response.
-            nextPlayTime =
-                playCtx.currentTime;
-
-
-            // The old item's fade may have taken the
-            // shared gain to zero.
-            //
-            // It is now safe to restore volume because
-            // the old item's sources have been stopped.
-            const now =
-                playCtx.currentTime;
-
-
-            biancaGainNode.gain.cancelScheduledValues(
-                now
-            );
-
-
-            biancaGainNode.gain.setValueAtTime(
-                1,
-                now
-            );
-
-
-            // This flag is still used by the current
-            // transcript UI. The NEW Bianca item is not
-            // interrupted.
-            biancaInterrupted =
-                false;
         }
-
-        currentBiancaItemId =
-            itemId;
-
-
-        currentBiancaContentIndex =
-            contentIndex ?? 0;
-
-
-        // IMPORTANT:
-        //
-        // Use startTime, NOT playCtx.currentTime.
-        //
-        // Why?
-        //
-        // This audio may be scheduled slightly
-        // into the future behind another chunk.
-        //
-        // startTime represents when the candidate
-        // will actually begin hearing it.
-        biancaPlaybackStartedAt =
-            startTime;
-
-
-        console.log(
-            "▶️ Bianca playback started:",
-            currentBiancaItemId,
-            "at",
-            biancaPlaybackStartedAt
-        );
+        const interruption = pendingBiancaInterruptions.get(previousItem);
+        if (interruption) {
+            interruption.audibleUntil = Math.min(interruption.audibleUntil, playCtx.currentTime);
+        }
+        nextPlayTime = playCtx.currentTime;
+        biancaGainNode.gain.cancelScheduledValues(playCtx.currentTime);
+        biancaGainNode.gain.setValueAtTime(1, playCtx.currentTime);
+        biancaInterrupted = false;
     }
 
+    const pcm16 = new Int16Array(arrayBuffer);
+    const float32 = new Float32Array(pcm16.length);
+    for (let i = 0; i < pcm16.length; i++) float32[i] = pcm16[i] / 32768;
+    const buffer = playCtx.createBuffer(1, float32.length, SAMPLE_RATE);
+    buffer.copyToChannel(float32, 0);
+    const source = playCtx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(biancaGainNode);
+    activeBiancaSources.set(source, itemId);
+    source.onended = () => activeBiancaSources.delete(source);
 
-    // -------------------------------------------------
-    // PLAY THE CHUNK
-    // -------------------------------------------------
-
-    source.start(
-        startTime
-    );
-
-
-    // Work out when THIS chunk finishes.
-    const chunkEndTime =
-        startTime
-        + audioBuffer.duration;
-
-
-    // This becomes the end of everything
-    // currently queued for Bianca.
-    nextPlayTime =
-        chunkEndTime;
-
-
-    biancaScheduledEndAt =
-        chunkEndTime;
+    const startTime = Math.max(playCtx.currentTime, nextPlayTime);
+    if (isNewItem) {
+        currentBiancaItemId = itemId;
+        currentBiancaContentIndex = contentIndex ?? 0;
+        biancaPlaybackStartedAt = startTime;
+    }
+    source.start(startTime);
+    nextPlayTime = startTime + buffer.duration;
+    biancaScheduledEndAt = nextPlayTime;
 }
-
 
 // -----------------------------------------------------
 // IS BIANCA ACTUALLY STILL SPEAKING?
@@ -2918,232 +2611,56 @@ function isBiancaPlaybackActive() {
 // -----------------------------------------------------
 
 function gracefullyInterruptBianca() {
-
-    // -------------------------------------------------
-    // ONLY INTERRUPT IF BIANCA IS ACTUALLY SPEAKING
-    // -------------------------------------------------
-
-    if (
-        !playCtx
-        || !biancaGainNode
-        || !isBiancaPlaybackActive()
-    ) {
-
-        console.log(
-            "🎤 Candidate spoke, but Bianca was not speaking"
-        );
-
-        return;
-    }
-
-
-    console.log(
-        "🤫 Candidate interrupted Bianca"
-    );
-
-        // Capture WHICH Bianca item is being interrupted.
-    //
-    // These values must not change even if a new
-    // Bianca response starts before cleanup finishes.
-    const interruptedItemId =
-        currentBiancaItemId;
-
-
-    const interruptedContentIndex =
-        currentBiancaContentIndex;
-
-
-    if (interruptedItemId) {
-
-        interruptedBiancaItemIds.add(
-            interruptedItemId
-        );
-    }
-
-    // -------------------------------------------------
-    // 1. REJECT LEFTOVER OLD AUDIO
-    // -------------------------------------------------
-
-    // OpenAI/FastAPI may have already sent some audio
-    // packets that are still travelling through the
-    // network.
-    //
-    // Setting this immediately prevents playChunk()
-    // from scheduling more old Bianca audio.
+    if (!playCtx || !biancaGainNode || !isBiancaPlaybackActive()) return;
+    const itemId = currentBiancaItemId;
+    if (interruptedBiancaItemIds.has(itemId)) return;
+    interruptedBiancaItemIds.add(itemId);
     biancaInterrupted = true;
 
+    // Keep the old item's position separate from a reply that arrives during fade-out.
+    const now = playCtx.currentTime;
+    const fadeEnd = now + INTERRUPT_FADE_MS / 1000;
+    const interruption = {
+        startedAt: biancaPlaybackStartedAt,
+        contentIndex: currentBiancaContentIndex,
+        audibleUntil: Math.min(biancaScheduledEndAt, fadeEnd)
+    };
+    pendingBiancaInterruptions.set(itemId, interruption);
+    biancaGainNode.gain.cancelScheduledValues(now);
+    biancaGainNode.gain.setValueAtTime(biancaGainNode.gain.value, now);
+    biancaGainNode.gain.linearRampToValueAtTime(0, fadeEnd);
+    for (const [source, sourceItem] of activeBiancaSources) {
+        if (sourceItem === itemId) {
+            try { source.stop(fadeEnd); } catch (error) { /* Already stopped. */ }
+        }
+    }
 
-    // -------------------------------------------------
-    // 2. FADE THE CURRENT AUDIO DOWN
-    // -------------------------------------------------
-
-    const now =
-        playCtx.currentTime;
-
-
-    const fadeSeconds =
-        INTERRUPT_FADE_MS / 1000;
-
-
-    // Remove any previous volume automation.
-    biancaGainNode.gain.cancelScheduledValues(
-        now
-    );
-
-
-    // Start the fade from the volume Bianca
-    // currently has.
-    biancaGainNode.gain.setValueAtTime(
-        biancaGainNode.gain.value,
-        now
-    );
-
-
-    // Smoothly move volume to zero.
-    //
-    // Example:
-    //
-    // 1.0
-    // 0.8
-    // 0.6
-    // 0.4
-    // 0.2
-    // 0.0
-    //
-    // over roughly 80 milliseconds.
-    biancaGainNode.gain.linearRampToValueAtTime(
-        0,
-        now + fadeSeconds
-    );
-
-
-    // -------------------------------------------------
-    // 3. AFTER THE FADE, REMOVE QUEUED AUDIO
-    // -------------------------------------------------
-
-    setTimeout(
-    () => {
-
-        // -------------------------------------------------
-        // HOW MUCH DID THE CANDIDATE ACTUALLY HEAR?
-        // -------------------------------------------------
-
-        const playedMs =
-            getBiancaPlayedMs();
-
-
-        console.log(
-            "⏱️ Bianca actually heard for:",
-            playedMs,
-            "ms"
-        );
-
-
-        // -------------------------------------------------
-        // STOP ALL OLD BIANCA AUDIO
-        // -------------------------------------------------
-
-                // Stop ONLY audio belonging to the Bianca item
-        // that the candidate actually interrupted.
-        //
-        // A newer Bianca response may already exist.
-
-        for (
-            const [
-                source,
-                sourceItemId
-            ]
-            of activeBiancaSources
-        ) {
-
-            if (
-                sourceItemId
-                === interruptedItemId
-            ) {
-
-                try {
-
-                    source.stop();
-
-                } catch (error) {
-
-                    // Already ended/stopped.
-                }
+    setTimeout(() => {
+        const playedMs = Math.max(0, Math.floor(
+            (Math.min(playCtx.currentTime, interruption.audibleUntil) - interruption.startedAt) * 1000
+        ));
+        for (const [source, sourceItem] of activeBiancaSources) {
+            if (sourceItem === itemId) {
+                try { source.stop(); } catch (error) { /* Already stopped. */ }
+                activeBiancaSources.delete(source);
             }
         }
-
-        // The old queue is now gone.
-        nextPlayTime =
-            playCtx.currentTime;
-
-
-        // -------------------------------------------------
-        // STOP CAPTION REVEAL
-        // -------------------------------------------------
-
-        if (interviewerCaptionTimer) {
-
-            clearInterval(
-                interviewerCaptionTimer
-            );
-
-
-            interviewerCaptionTimer =
-                null;
+        // An old cleanup callback must never reset a newer reply's queue or captions.
+        if (currentBiancaItemId === itemId) {
+            nextPlayTime = playCtx.currentTime;
+            if (interviewerCaptionTimer) clearInterval(interviewerCaptionTimer);
+            interviewerCaptionTimer = null;
+            biancaPlaybackStartedAt = null;
+            biancaScheduledEndAt = null;
         }
-
-
-        // -------------------------------------------------
-        // REPORT PLAYBACK POSITION TO FASTAPI
-        // -------------------------------------------------
-
-        if (
-            ws
-            && ws.readyState === WebSocket.OPEN
-            && interruptedItemId
-        ) {
-
-            ws.send(
-                JSON.stringify({
-                    type:
-                        "playback_interrupted",
-
-                    item_id:
-                        interruptedItemId,
-
-                    content_index:
-                        currentBiancaContentIndex,
-
-                    played_ms:
-                        playedMs
-                })
-            );
-
-
-            console.log(
-                "✂️ Truncation report sent:",
-                interruptedItemId,
-                playedMs
-            );
+        if (ws && ws.readyState === WebSocket.OPEN && itemId) {
+            ws.send(JSON.stringify({
+                type: "playback_interrupted", item_id: itemId,
+                content_index: interruption.contentIndex, played_ms: playedMs
+            }));
         }
-
-
-        // -------------------------------------------------
-        // RESET LOCAL TRACKING
-        // -------------------------------------------------
-
-        biancaPlaybackStartedAt =
-            null;
-
-
-        biancaScheduledEndAt =
-            null;
-
-    },
-
-    // Give the fade enough time to actually finish.
-    INTERRUPT_FADE_MS + 20
-);
+        pendingBiancaInterruptions.delete(itemId);
+    }, INTERRUPT_FADE_MS + 20);
 }
 
 
@@ -3332,10 +2849,53 @@ function getBiancaPlayedMs() {
     );
 }
 
+// The secret is in the URL fragment, which is never sent in HTTP access logs.
+// Exchange it for an HttpOnly cookie; remove it from the address bar afterward.
+async function loadInterviewJob() {
+    const token = new URLSearchParams((window.location.hash || "").slice(1)).get("invite");
+    const startButton = document.getElementById("welcome-start");
+    const error = document.getElementById("invitation-error");
+    const heading = document.getElementById("candidate-job-title");
+    try {
+        if (!token && new URLSearchParams(window.location.search).has("job_id")) {
+            throw new Error("This shared job link has been replaced. Ask the recruiter for your personal invitation.");
+        }
+        const response = token
+            ? await fetch("/api/invitations/exchange", {
+                method: "POST", headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({token})
+            })
+            : await fetch("/api/invitation");
+        const data = await response.json();
+        if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "This invitation is unavailable.");
+        if (token) window.history.replaceState(null, "", window.location.pathname);
+        jobId = data.job_id;
+        candidateCsrf = data.csrf_token;
+        document.getElementById("candidate-name").value = data.candidate_name;
+        document.getElementById("candidate-welcome").textContent = `Welcome, ${data.candidate_name}`;
+        heading.textContent = `${data.title} interview`;
+        document.getElementById("interview-job-title").textContent = heading.textContent;
+        document.title = `${data.title} | TalentSift Interview`;
+        startButton.disabled = false;
+    } catch (cause) {
+        jobId = null;
+        candidateCsrf = null;
+        startButton.disabled = true;
+        heading.textContent = "Personal invitation required";
+        error.textContent = cause.message || "Ask the recruiter for your personal interview link.";
+        error.hidden = false;
+        document.getElementById("recruiter-setup-link").hidden = false;
+    }
+}
+
 // Candidate always begins here.
-show(
-    "welcome"
-);
+window.addEventListener("pagehide", () => {
+    // Best effort only: chunks already written by the server are kept;
+    // abruptly closing a tab can lose the final chunk.
+    void interviewRecorder?.finish(false);
+});
+show("welcome");
+loadInterviewJob();
 
     </script>
 

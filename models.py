@@ -57,6 +57,18 @@ class Job(BaseModel):
     updated_at: datetime | None = None
 
 
+class JobListing(BaseModel):
+    """The MVP's persisted job title and generated ID.
+
+    The existing Job model describes a full job rubric; the current
+    interview still uses its shared scoring rubric.
+    """
+
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    title: str
+    created_at: datetime = Field(default_factory=utc_now)
+
+
 class Candidate(BaseModel):
 
     id: str = Field(
