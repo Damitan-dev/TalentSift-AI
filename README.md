@@ -16,6 +16,31 @@ autonomous hiring decisions.
 This repository contains work developed as part of the **TalentSift AI Product
 Management & Engineering Internship**.
 
+## Access control setup (September 2026 update)
+
+Before using recruiter pages, create your account once with
+`python manage_access.py create-recruiter`, start `uvicorn app:app --reload`,
+and open `http://127.0.0.1:8000/login`.
+
+Each candidate now needs a personal invitation created from the job dashboard.
+The invitation supplies their read-only name. Old shared `?job_id=` links no
+longer start interviews. Default usage limits are 10 starts per UTC day and
+2 concurrent interviews. The database is migrated additively at startup.
+
+Read [installation and operation](docs/access_control_setup.md) and
+[how the controls work, and why](docs/access_control_explained.md).
+
+## Required interview topic coverage
+
+Bianca now uses a server-owned plan with six core questions across the five
+scoring areas. Collaboration and feedback/ownership have separate questions.
+Normal completion checks that the required questions were generated and followed
+by candidate audio turns. The hard time limit and candidate-controlled ending
+can still leave areas unexplored. This check tracks question opportunities,
+not answer quality.
+
+Read [the coverage explanation and update instructions](docs/interview_coverage.md).
+
 ## Current MVP Capabilities
 
 The current MVP includes:
@@ -355,8 +380,8 @@ labelled incomplete. Earlier interviews cannot acquire audio retroactively.
 
 See [the audio saving setup guide](docs/audio_saving.md) for the changed files,
 consent flow, storage details, and microphone checks. The interview stream and
-live-caption transcription configuration are unchanged. Deployment is paused
-while this feature is tested with a real microphone.
+live-caption transcription configuration are unchanged. Use the access-control setup guide before any public deployment, and complete
+a microphone/recording check on the hosted URL.
 
 ## Current MVP Limitations
 
@@ -369,8 +394,9 @@ A mid-interview upstream WebSocket failure currently terminates the interview.
 TalentSift retries OpenAI Realtime startup connections, but automatic
 mid-interview conversation reconstruction is not yet implemented.
 
-Recruiter authentication and role-based access control are not yet implemented.
-The current recruiter identity used for overrides is a development placeholder.
+A single recruiter account now protects recruiter pages and downloads. Score
+changes record the authenticated username. Multiple recruiter organizations,
+separate ownership policies, and public signup are outside this beta scope.
 
 SQLite and JSON storage are suitable for the current MVP and local development,
 but a larger multi-user deployment would require a stronger persistence and
@@ -384,3 +410,12 @@ PDF interview-report export is not currently implemented.
 TalentSift does not claim to eliminate hiring bias. Recruiters remain
 responsible for hiring decisions and should review interview evidence alongside
 AI-assisted evaluation outputs.
+
+## Interview turn timing
+
+For candidate interruptions or slow replies, see [the timing update and tuning
+guide](docs/turn_timing.md). The primary interview now uses semantic turn detection
+and replies from committed audio without waiting for the final transcript.
+
+For an interview that stops with `no close frame received or sent`, see
+[connection diagnostics and the cleanup update](docs/connection_failures.md).

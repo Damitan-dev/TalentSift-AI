@@ -8,6 +8,8 @@ from fastapi import WebSocketDisconnect
 from websockets.exceptions import ConnectionClosedError
 import pytest
 
+from interview_coverage import TOPICS
+
 
 class Socket:
     def __init__(self):
@@ -56,7 +58,8 @@ async def message(socket, kind):
                 return event
 
 
-def test_relay_replies_before_asr_but_saves_in_order_and_waits_to_score(tmp_path, monkeypatch):
+@pytest.mark.parametrize("advance_tool", ["next_interview_topic", "finish_interview"])
+def test_relay_covers_all_topics_without_waiting_for_asr_but_waits_to_score(tmp_path, monkeypatch, advance_tool):
     monkeypatch.setenv('TALENTSIFT_DATA_DIR', str(tmp_path))
     monkeypatch.setenv('OPENAI_API_KEY', 'unused-test-value')
     monkeypatch.setenv('TALENTSIFT_LIVE_CAPTIONS', '0')
@@ -99,6 +102,27 @@ def test_relay_replies_before_asr_but_saves_in_order_and_waits_to_score(tmp_path
         async def vad(kind, iid):
             await engine.emit({'type': 'input_audio_buffer.' + kind, 'item_id': iid})
 
+        async def tool_call(request, rid, name, missing_id_first=False):
+            await created(request, rid)
+            if missing_id_first:
+                await engine.emit({'type': 'response.output_item.done', 'response_id': rid,
+                                   'item': {'type': 'function_call', 'name': name}})
+            await engine.emit({'type': 'response.output_item.done', 'response_id': rid,
+                               'item': {'type': 'function_call', 'name': name, 'call_id': rid}})
+            result = await message(engine, 'conversation.item.create')
+            assert engine.sent.empty(), 'Continuation cannot overlap its tool response'
+            # A duplicate tool event must not skip the next question.
+            await engine.emit({'type': 'response.output_item.done', 'response_id': rid,
+                               'item': {'type': 'function_call', 'name': name, 'call_id': rid}})
+            await engine.emit({'type': 'response.done', 'response': {'id': rid, 'output': []}})
+            return result, await message(engine, 'response.create')
+
+        async def final_asr(iid, text):
+            await engine.emit({'type': 'conversation.item.input_audio_transcription.completed',
+                               'item_id': iid, 'transcript': text})
+            while (await message(browser, 'transcript')).get('text') != text:
+                pass
+
         try:
             opening = await message(engine, 'response.create')
             await created(opening, 'opening')
@@ -106,45 +130,62 @@ def test_relay_replies_before_asr_but_saves_in_order_and_waits_to_score(tmp_path
             await message(browser, 'opening_generated')
             await browser.emit({'type': 'opening_playback_finished'})
             await message(browser, 'interview_timer_started')
-            await vad('speech_started', 'answer-1')
-            await vad('speech_stopped', 'answer-1')
-            await vad('committed', 'answer-1')
+            await vad('speech_started', 'readiness')
+            await vad('speech_stopped', 'readiness')
+            await vad('committed', 'readiness')
             # No ASR has arrived. Native audio must already trigger a reply.
             reply = await message(engine, 'response.create')
-            await created(reply, 'reply-1')
-            await audio_and_done('reply-1', 'question-1', 'Next question')
-            await message(browser, 'transcript')
-            assert saved == ['Hello']
-            await vad('speech_started', 'answer-2')
-            await engine.emit({'type': 'conversation.item.input_audio_transcription.completed',
-                               'item_id': 'answer-1', 'transcript': 'Yes'})
-            while (await message(browser, 'transcript')).get('speaker') != 'candidate':
-                pass
-            assert engine.sent.empty(), 'Late ASR must not answer over new speech'
-            assert saved == ['Hello', 'Yes', 'Next question']
-            await vad('speech_stopped', 'answer-2')
-            await vad('committed', 'answer-2')
-            last = await message(engine, 'response.create')
-            await created(last, 'tool-response')
-            await engine.emit({'type': 'response.output_item.done', 'response_id': 'tool-response',
-                               'item': {'type': 'function_call', 'name': 'finish_interview', 'call_id': 'call'}})
-            await message(engine, 'conversation.item.create')
-            assert engine.sent.empty(), 'Closing cannot overlap the active tool response'
-            await engine.emit({'type': 'response.done', 'response': {'id': 'tool-response', 'output': []}})
-            closing = await message(engine, 'response.create')
+            result, question_request = await tool_call(reply, 'start-plan', advance_tool, True)
+            progress = json.loads(result['item']['output'])
+            assert progress['finish_accepted'] is False
+            assert progress['current'] == 'experience'
+            expected = ['Hello', 'Yes']
+            for index, topic in enumerate(TOPICS):
+                question = topic.question('en')
+                assert question in question_request['response']['instructions']
+                assert question_request['response']['tools'] == []
+                assert question_request['response']['metadata']['talentsift_kind'] == 'candidate'
+                await created(question_request, f'question-response-{index}')
+                await audio_and_done(f'question-response-{index}', f'question-{index}', question)
+                # Drain through this question to establish event processing.
+                while (await message(browser, 'transcript')).get('text') != question:
+                    pass
+                iid = f'answer-{index}'
+                expected.append(question)
+                await vad('speech_started', iid)
+                if index == 0:
+                    assert saved == ['Hello']
+                    await final_asr('readiness', 'Yes')
+                    assert saved == expected
+                    assert engine.sent.empty(), 'Late ASR must not reply over new speech'
+                await vad('speech_stopped', iid)
+                await vad('committed', iid)
+                # Again, the next reply must not wait for this answer's ASR.
+                reply = await message(engine, 'response.create')
+                answer_text = f'Answer for {topic.key}'
+                expected.append(answer_text)
+                if index < len(TOPICS) - 1:
+                    await final_asr(iid, answer_text)
+                    result, question_request = await tool_call(reply, f'advance-{index}', advance_tool)
+                    progress = json.loads(result['item']['output'])
+                    assert progress['finish_accepted'] is False
+                    assert progress['current'] == TOPICS[index + 1].key
+                    assert progress['completed'] == [t.key for t in TOPICS[:index + 1]]
+                else:
+                    result, closing = await tool_call(reply, 'finish', 'finish_interview')
+                    assert result['item']['output'] == 'Interview completion accepted.'
             assert closing['response']['metadata']['talentsift_kind'] == 'closing'
             await created(closing, 'closing')
             await audio_and_done('closing', 'goodbye', 'Goodbye')
             await message(browser, 'closing_generated')
             await browser.emit({'type': 'closing_playback_finished'})
             await message(browser, 'interview_complete')
-            assert scored == [], 'Must not score before final answer is stored'
-            await engine.emit({'type': 'conversation.item.input_audio_transcription.completed',
-                               'item_id': 'answer-2', 'transcript': 'Final answer'})
+            assert scored == [], 'Must not score before the final answer is stored'
+            await final_asr(iid, answer_text)
             async with asyncio.timeout(2):
                 while not scored:
                     await asyncio.sleep(0.001)
-            assert scored == [['Hello', 'Yes', 'Next question', 'Final answer', 'Goodbye']]
+            assert scored == [expected + ['Goodbye']]
             await browser.close()
             await asyncio.wait_for(task, 2)
         finally:
@@ -215,6 +256,67 @@ def test_primary_disconnect_stops_both_pumps_and_marks_failed(ending, tmp_path, 
             assert 'AAA=' not in output
             if ending == 'abrupt':
                 assert 'no close frame received or sent' in output
+        finally:
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('ending', ['candidate_stop', 'time_limit'])
+def test_incomplete_coverage_does_not_block_explicit_stop_or_deadline(ending, tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv('OPENAI_API_KEY', 'unused-test-value')
+    monkeypatch.setenv('TALENTSIFT_LIVE_CAPTIONS', '0')
+    monkeypatch.setenv('TALENTSIFT_DATA_DIR', str(tmp_path))
+    app = importlib.import_module('app')
+    session = SimpleNamespace(id='incomplete-interview', status='pending', started_at=None, language='en')
+    monkeypatch.setattr(app, 'load_session', lambda _: session)
+    monkeypatch.setattr(app, 'save_session', lambda _: None)
+    monkeypatch.setattr(app, 'save_transcript_turn', lambda *_: None)
+    monkeypatch.setattr(app, 'score_database_session', lambda _: (SimpleNamespace(overall=None), 'score'))
+    if ending == 'time_limit':
+        monkeypatch.setattr(app, 'INTERVIEW_MAX_SECONDS', 0.03)
+        monkeypatch.setattr(app, 'INTERVIEW_WARNING_SECONDS', 0.01)
+
+    async def scenario():
+        engine, browser = Socket(), Browser()
+
+        @asynccontextmanager
+        async def connect(config):
+            yield engine
+        monkeypatch.setattr(app, 'connect_to_engine_with_retry', connect)
+        task = asyncio.create_task(app.interview_relay(browser, session.id))
+        try:
+            opening = await message(engine, 'response.create')
+            await engine.emit({'type': 'response.created', 'response': {
+                'id': 'opening', 'metadata': opening['response']['metadata']}})
+            await engine.emit({'type': 'response.done', 'response': {'id': 'opening', 'output': []}})
+            await message(browser, 'opening_generated')
+            await browser.emit({'type': 'opening_playback_finished'})
+            await message(browser, 'interview_timer_started')
+            if ending == 'candidate_stop':
+                await browser.emit({'type': 'end_interview'})
+                await message(browser, 'interview_ended_early')
+                assert session.status == 'ended_early'
+                assert engine.sent.empty()
+            else:
+                deadline = await message(engine, 'response.create')
+                assert deadline['response']['metadata']['talentsift_kind'] == 'deadline'
+                await engine.emit({'type': 'response.created', 'response': {
+                    'id': 'deadline', 'metadata': deadline['response']['metadata']}})
+                await engine.emit({'type': 'response.output_item.done', 'response_id': 'deadline',
+                                   'item': {'type': 'function_call', 'name': 'finish_interview', 'call_id': 'timeout'}})
+                result = await message(engine, 'conversation.item.create')
+                assert result['item']['output'] == 'Interview completion accepted.'
+                await engine.emit({'type': 'response.done', 'response': {'id': 'deadline', 'output': []}})
+                closing = await message(engine, 'response.create')
+                assert closing['response']['metadata']['talentsift_kind'] == 'closing'
+                output = capsys.readouterr().out
+                assert '"reason": "time_limit"' in output
+                assert '"completed": []' in output
+                assert 'collaboration' in output
+            await browser.close()
+            await asyncio.wait_for(task, 2)
         finally:
             if not task.done():
                 task.cancel()
