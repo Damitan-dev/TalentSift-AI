@@ -10,6 +10,7 @@ from live_captions import LiveCaptionRelay
 from recording_routes import router as recording_router
 from recording_storage import recording_store, RecordingError
 from interview_turns import InterviewTurns, FinalTranscripts, build_turn_detection
+from interview_coverage import InterviewCoverage, NEXT_TOPIC_TOOL, FINISH_TOOL
 from relay_lifecycle import run_relay_pair, connection_failure_details, is_billing_failure
 
 from models import (
@@ -144,7 +145,7 @@ prompt_template = PROMPT_FILE.read_text(
 # INTERVIEW FINISHING RULE
 # ---------------------------------------------------------
 
-# Bianca decides WHEN the interview is finished.
+# The server validates topic coverage before accepting a normal finish.
 #
 # But Bianca does not invent the final closing.
 # She calls our finish_interview tool instead.
@@ -175,10 +176,15 @@ INTERVIEW BOUNDARIES
 - If an area could not be meaningfully explored,
   move on rather than repeatedly forcing an answer.
 
-When the required interview areas have been covered,
-or there are no more substantive questions that would
-reasonably improve the interview evidence, call the
-finish_interview tool.
+Use the server question plan for all core questions. After readiness is
+confirmed, call next_interview_topic to start. After each answer and at most
+one useful follow-up, call it again to obtain the next required question.
+Do not select or skip core topics yourself. Collaboration and feedback/ownership
+are separate required questions even though both use Culture & Values Fit.
+Only call finish_interview when the server checklist is complete, unless
+the server explicitly requests completion because the time limit was reached.
+If completion is rejected, continue with the question supplied by the server;
+do not say goodbye or treat the rejected request as the end of the interview.
 
 Do not create your own closing statement.
 Do not tell the candidate their score or whether
@@ -381,23 +387,7 @@ def build_session_config(language_code: str):
             # Same interview instructions used by
             # our existing CLI interview.
            "instructions": build_instructions(language_code),
-            "tools": [
-            {
-                "type": "function",
-                "name": "finish_interview",
-                "description": (
-                    "Call this only when all required "
-                    "interview questions and necessary "
-                    "follow-up questions have been completed "
-                    "and the interview should now end."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {},
-                    "additionalProperties": False,
-                },
-            }
-        ],
+            "tools": [NEXT_TOPIC_TOOL, FINISH_TOOL],
 
         "tool_choice": "auto",
 
@@ -836,11 +826,23 @@ async def interview_relay(ws_browser: WebSocket, session_id: str):
                 "timer_task": None,
             }
 
+            coverage = InterviewCoverage(session.language)
+            handled_tool_calls = set()
+            interview_state["clock_started_at"] = None
+
+            def candidate_response_options():
+                started = interview_state["clock_started_at"]
+                remaining = (INTERVIEW_MAX_SECONDS if started is None else
+                             INTERVIEW_MAX_SECONDS - (time.monotonic() - started))
+                return coverage.response_options(
+                    session_config["session"]["instructions"], remaining)
+
             final_transcripts = FinalTranscripts(
                 lambda turn: save_transcript_turn(session_id, turn)
             )
             turns = InterviewTurns(
                 ws_engine,
+                candidate_response=candidate_response_options,
                 allow_reply=lambda: (
                     interview_state["opening_complete"]
                     and not interview_state["finish_requested"]
@@ -962,7 +964,8 @@ async def interview_relay(ws_browser: WebSocket, session_id: str):
                             "The maximum TalentSift interview time has now been reached. "
                             "Do not ask another interview question. Call the finish_interview "
                             "tool immediately. Do not give a score or hiring decision."
-                        )},
+                        ), "tools": [FINISH_TOOL],
+                           "tool_choice": {"type": "function", "name": "finish_interview"}},
                         interrupt=True,
                     )
 
@@ -1120,6 +1123,7 @@ async def interview_relay(ws_browser: WebSocket, session_id: str):
                                 is None
                             ):
 
+                                interview_state["clock_started_at"] = time.monotonic()
                                 interview_state[
                                     "timer_task"
                                 ] = asyncio.create_task(
@@ -1495,6 +1499,7 @@ async def interview_relay(ws_browser: WebSocket, session_id: str):
 
                         if not await turns.response_created(event.get("response", {})):
                             continue
+                        coverage.response_created(event.get("response", {}).get("id"))
                         print(
                             "🤖 New Bianca response started"
                         )
@@ -1588,6 +1593,11 @@ async def interview_relay(ws_browser: WebSocket, session_id: str):
                                     TranscriptTurn(speaker="interviewer", text=text, item_id=item["id"])
                                     if text else None,
                                 )
+                        coverage.response_done(
+                            event.get("response", {}),
+                            allowed=turns.response_allowed({
+                                "response_id": event.get("response", {}).get("id")}),
+                        )
                         await turns.response_done(event.get("response", {}))
                         response_data = event.get(
                             "response",
@@ -1676,54 +1686,59 @@ async def interview_relay(ws_browser: WebSocket, session_id: str):
                         )
 
 
-                        # We only care here about function calls.
-                        if (
-                            item.get("type") == "function_call"
-                            and item.get("name") == "finish_interview"
-                        ):
+                        if item.get("type") != "function_call":
+                            continue
+                        name = item.get("name")
+                        if name not in ("next_interview_topic", "finish_interview"):
+                            continue
+                        call_id = item.get("call_id")
+                        if not call_id or call_id in handled_tool_calls:
+                            continue
+                        handled_tool_calls.add(call_id)
+                        if closing_response_id or awaiting_closing_response:
+                            continue
 
-                            print(
-                                "🏁 Bianca requested interview finish"
-                            )
+                        at_deadline = interview_state["time_limit_reached"]
+                        if name == "next_interview_topic" or (not at_deadline and not coverage.can_finish):
+                            # The model cannot mark arbitrary topics complete. A
+                            # prescribed spoken question and a subsequent candidate
+                            # audio turn are required before advancing one topic.
+                            if not at_deadline:
+                                coverage.advance()
+                            result = {
+                                "finish_accepted": False,
+                                "action": "finish_interview" if at_deadline else "continue_question_plan",
+                                **coverage.progress(),
+                            }
+                            print("[coverage]", json.dumps(result))
+                            await ws_engine.send(json.dumps({
+                                "type": "conversation.item.create",
+                                "item": {"type": "function_call_output", "call_id": call_id,
+                                         "output": json.dumps(result)},
+                            }))
+                            if at_deadline:
+                                await turns.control_response("deadline", {
+                                    "instructions": "Time is up. Call finish_interview immediately.",
+                                    "tools": [FINISH_TOOL],
+                                    "tool_choice": {"type": "function", "name": "finish_interview"},
+                                })
+                            else:
+                                # A normal tool continuation obeys the same VAD,
+                                # interruption and single-response rules as a reply.
+                                await turns.control_response("candidate")
+                            continue
 
-                            # -----------------------------------------
-                            # INTERVIEW IS NOW FINISHING
-                            # -----------------------------------------
-
-                            interview_state[
-                                "finish_requested"
-                            ] = True
-
-
-                            timer_task = interview_state[
-                                "timer_task"
-                            ]
-
-
-                            if (
-                                timer_task
-                                and not timer_task.done()
-                            ):
-
-                                timer_task.cancel()   
-
-
-                            # -----------------------------------------
-                            # GET THE TOOL CALL ID
-                            # -----------------------------------------
-                            call_id = item.get(
-                                "call_id"
-                            )
-
-
-                            if not call_id:
-
-                                print(
-                                    "❌ finish_interview had no call_id"
-                                )
-
-                                continue
-
+                        if name == "finish_interview":
+                            if coverage.can_finish and coverage.current:
+                                coverage.advance()
+                            print("[coverage] finish", json.dumps({
+                                "reason": "time_limit" if at_deadline else "all_topics",
+                                **coverage.progress(),
+                            }))
+                            interview_state["finish_requested"] = True
+                            timer_task = interview_state["timer_task"]
+                            if timer_task and not timer_task.done():
+                                timer_task.cancel()
 
                             # -----------------------------------------
                             # LOAD THE REAL TALENTSIFT SESSION
@@ -2081,6 +2096,7 @@ async def interview_relay(ws_browser: WebSocket, session_id: str):
 
                     elif event_type == "input_audio_buffer.committed":
                         final_transcripts.expect(event.get("item_id"))
+                        coverage.audio_committed(event.get("item_id"))
                         await turns.audio_committed(event.get("item_id"))
 
                     elif event_type == "conversation.item.input_audio_transcription.failed":
@@ -2092,6 +2108,7 @@ async def interview_relay(ws_browser: WebSocket, session_id: str):
                         event_type
                         == "input_audio_buffer.speech_started"
                     ):
+                        coverage.speech_started(event.get("item_id"))
                         await turns.speech_started(event.get("item_id"))
                         # Stop queued playback when the engine cancels its response.
                         await ws_browser.send_json({"type": "interrupt"})

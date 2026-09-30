@@ -25,11 +25,13 @@ def build_turn_detection():
 
 
 class InterviewTurns:
-    def __init__(self, engine, allow_reply, log=print, clock=time.monotonic):
+    def __init__(self, engine, allow_reply, log=print, clock=time.monotonic,
+                 candidate_response=None):
         self.engine = engine
         self.allow_reply = allow_reply
         self.log = log
         self.clock = clock
+        self.candidate_response = candidate_response or (lambda: {})
         self.speaking = False
         self.current_item = None
         self.epoch = 0
@@ -89,10 +91,11 @@ class InterviewTurns:
         await self.maybe_reply()
 
     async def control_response(self, kind, response=None, interrupt=False):
-        """Opening, closing, and the existing hard deadline share one response slot."""
+        """All responses share one slot; normal tool continuations also wait for speech."""
         if self.closed:
             return
-        self.pending_candidate = None
+        if kind != "candidate":
+            self.pending_candidate = None
         self.pending_control = (kind, response or {})
         if interrupt and self.active_id:
             self.suppressed.add(self.active_id)
@@ -106,6 +109,16 @@ class InterviewTurns:
             return
         if self.pending_control:
             kind, response = self.pending_control
+            if kind == "candidate":
+                if self.speaking or not self.allow_reply():
+                    return
+                if self.epoch > self.replied_epoch:
+                    # A tool result may be ready while the candidate resumes.
+                    # Wait for that new audio, then send ONE continuation.
+                    if not self.pending_candidate or self.pending_candidate[0] != self.epoch:
+                        return
+                    self.replied_epoch = self.epoch
+                    self.pending_candidate = None
             self.pending_control = None
             await self.request(kind, response)
             return
@@ -129,7 +142,8 @@ class InterviewTurns:
         self.request_event_id = "talentsift_" + uuid4().hex
         self.request_time = self.clock()
         self.request_interrupted = False
-        payload = dict(response)
+        payload = dict(self.candidate_response() if kind == "candidate" else {})
+        payload.update(response)
         payload["metadata"] = {**payload.get("metadata", {}), "talentsift_kind": kind}
         try:
             await self.send({
