@@ -377,6 +377,12 @@ async function loadMicrophones() {
 
 async function prepareMicrophone() {
 
+    // Two clicks must not create two processors sending to the same socket.
+    if (microphonePreparing || (ws && ws.readyState !== WebSocket.CLOSED)) return;
+    microphonePreparing = true;
+    const useMicrophoneButton = document.getElementById("use-selected-mic");
+    useMicrophoneButton.disabled = true;
+
     // Hide any previous microphone error.
     document.getElementById(
         "mic-error"
@@ -384,6 +390,8 @@ async function prepareMicrophone() {
 
 
     try {
+
+        await releaseMicrophoneCapture();
 
         // ---------------------------------------------
         // 1. ASK THE BROWSER FOR THE MICROPHONE
@@ -451,10 +459,17 @@ micStream =
         // 2. CREATE THE AUDIO PROCESSING ENGINE
         // ---------------------------------------------
 
-        captureCtx =
-            new AudioContext({
-                sampleRate: SAMPLE_RATE
-            });
+        try {
+            captureCtx = new AudioContext({sampleRate: SAMPLE_RATE});
+        } catch (error) {
+            if (error.name !== "NotSupportedError") throw error;
+            // Devices that cannot open at 24 kHz use their native rate;
+            // the encoder below still sends exactly 24 kHz PCM16.
+            captureCtx = new AudioContext();
+        }
+
+        const captureContext = captureCtx;
+        const pcmEncoder = new Pcm16StreamEncoder(SAMPLE_RATE);
 
             console.log(
                 "🎚️ Capture AudioContext sample rate:",
@@ -499,6 +514,10 @@ micStream =
             // microphone chunk, this function runs.
             micProcessor.onaudioprocess = (event) => {
 
+                // An old callback queued before cleanup cannot join a new stream.
+                if (captureContext !== captureCtx || !candidateAudioEnabled
+                        || !ws || ws.readyState !== WebSocket.OPEN) return;
+
                 // Get the candidate's microphone samples.
                 //
                 // Browser audio arrives as Float32 numbers.
@@ -514,17 +533,15 @@ micStream =
                 // This function already exists lower
                 // down in your index.html.
                 const pcm16 =
-                    floatTo16BitPCM(
-                        float32
+                    pcmEncoder.encode(
+                        float32, event.inputBuffer.sampleRate
                     );
 
 
                 // Only send if our WebSocket to FastAPI
                 // actually exists AND is open.
                 if (
-                    candidateAudioEnabled
-                    && ws
-                    && ws.readyState === WebSocket.OPEN
+                    pcm16.byteLength
                 ) {
 
                     // Convert binary PCM16 into Base64 text
@@ -593,6 +610,8 @@ connectInterviewWebSocket();
 
     } catch (error) {
 
+        await releaseMicrophoneCapture();
+
         // Candidate denied access, microphone does not
         // exist, or browser could not open it.
         console.error(
@@ -611,6 +630,9 @@ connectInterviewWebSocket();
         document.getElementById(
             "mic-error"
         ).hidden = false;
+    } finally {
+        microphonePreparing = false;
+        useMicrophoneButton.disabled = false;
     }
 }
 
@@ -1082,6 +1104,31 @@ let micSource = null;
 // Later this will send those chunks through
 // the WebSocket to FastAPI.
 let micProcessor = null;
+let microphonePreparing = false;
+
+async function releaseMicrophoneCapture() {
+    candidateAudioEnabled = false;
+    const context = captureCtx;
+    // Preserve the recorder's final chunk before closing its shared audio clock.
+    if (interviewRecorder) {
+        try { await interviewRecorder.finish(false); } catch (_) { /* optional recording */ }
+        interviewRecorder = null;
+    }
+    if (micProcessor) {
+        micProcessor.onaudioprocess = null;
+        try { micProcessor.disconnect(); } catch (_) { /* already disconnected */ }
+    }
+    try { micSource?.disconnect(); } catch (_) { /* already disconnected */ }
+    micStream?.getTracks().forEach(track => track.stop());
+    micProcessor = null;
+    micSource = null;
+    micStream = null;
+    captureCtx = null;
+    if (playCtx === context) playCtx = null;
+    if (context && context.state !== "closed") {
+        try { await context.close(); } catch (_) { /* already closed */ }
+    }
+}
 
 
 
@@ -1444,6 +1491,7 @@ function connectInterviewWebSocket() {
         new WebSocket(
             wsUrl
         );
+    const interviewSocket = ws;
 
 
     // -------------------------------------------------
@@ -1451,6 +1499,7 @@ function connectInterviewWebSocket() {
     // -------------------------------------------------
 
     ws.onopen = () => {
+        if (ws !== interviewSocket) return;
 
         console.log(
             "✅ Real interview WebSocket connected:",
@@ -1488,6 +1537,7 @@ function connectInterviewWebSocket() {
             // -------------------------------------------------
 
            ws.onmessage = (event) => {
+    if (ws !== interviewSocket) return;
 
     // JSON text -> JavaScript object
     const msg =
@@ -1879,6 +1929,7 @@ function connectInterviewWebSocket() {
             // -------------------------------------------------
 
             ws.onclose = (event) => {
+                if (ws !== interviewSocket) return;
                 if (!interviewCompleted && !interviewEndedEarly && !interviewFailed) {
                     showInterviewConnectionError("The interview connection was lost. Contact the recruiter for a new invitation.");
                 }
@@ -1890,6 +1941,12 @@ function connectInterviewWebSocket() {
                 }
                 activeBiancaSources.clear();
                 void interviewRecorder?.finish(false);
+                // Recording needs the shared audio clock through its final chunk.
+                candidateAudioEnabled = false;
+                if (micProcessor) {
+                    micProcessor.onaudioprocess = null;
+                    try { micProcessor.disconnect(); } catch (_) { /* already disconnected */ }
+                }
                 micStream?.getTracks().forEach(track => track.stop());
 
                 console.log(
@@ -1915,6 +1972,7 @@ function connectInterviewWebSocket() {
             // -------------------------------------------------
 
             ws.onerror = (error) => {
+                if (ws !== interviewSocket) return;
 
                 console.error(
                     "WebSocket error:",
@@ -1933,6 +1991,45 @@ function connectInterviewWebSocket() {
         // -----------------------------------------------------
         // FLOAT32 -> PCM16
         // -----------------------------------------------------
+
+        class Pcm16StreamEncoder {
+            constructor(targetRate) {
+                this.targetRate = targetRate;
+                this.inputRate = null;
+            }
+
+            encode(samples, inputRate) {
+                if (!Number.isFinite(inputRate) || inputRate <= 0) {
+                    throw new Error("Microphone audio has no valid sample rate.");
+                }
+                // Web Audio normally resamples into our requested 24 kHz context.
+                if (inputRate === this.targetRate) return floatTo16BitPCM(samples);
+                if (this.inputRate !== inputRate) {
+                    this.inputRate = inputRate;
+                    this.ratio = inputRate / this.targetRate;
+                    this.remaining = this.ratio;
+                    this.sum = 0;
+                }
+                // Average each target sample's input interval. Preserve partial
+                // intervals across callbacks, especially for 44.1 -> 24 kHz.
+                const output = [];
+                for (const sample of samples) {
+                    let available = 1;
+                    while (available > 1e-10) {
+                        const weight = Math.min(available, this.remaining);
+                        this.sum += sample * weight;
+                        this.remaining -= weight;
+                        available -= weight;
+                        if (this.remaining < 1e-10) {
+                            output.push(this.sum / this.ratio);
+                            this.remaining = this.ratio;
+                            this.sum = 0;
+                        }
+                    }
+                }
+                return floatTo16BitPCM(new Float32Array(output));
+            }
+        }
 
         function floatTo16BitPCM(float32) {
 

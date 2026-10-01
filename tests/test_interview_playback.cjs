@@ -6,8 +6,9 @@ const path = require('node:path');
 const vm = require('node:vm');
 const html = fs.readFileSync(path.join(__dirname, '../client/index.html'), 'utf8');
 
-function setup() {
+function setup({captureRate=24000}={}) {
     const elements = new Map(), intervals = new Map(), timeouts = new Map();
+    const capture = {attempts:0,streams:[],contexts:[],processors:[],wait:null,failProcessor:false};
     let timerId = 0;
     function element() {
         return {textContent:'',value:'',hidden:true,disabled:false,dataset:{},children:[],
@@ -16,8 +17,24 @@ function setup() {
         };
     }
     class AudioClock {
-        constructor() { this.state='running'; this.currentTime=0; this.sources=[]; }
+        constructor(options) {
+            if(options?.sampleRate && capture.unsupportedRate) {
+                const error=new Error('Requested capture rate is unsupported');
+                error.name='NotSupportedError';
+                throw error;
+            }
+            this.state='running'; this.currentTime=0; this.sources=[]; this.sampleRate=captureRate;
+            capture.contexts.push(this);
+        }
         resume() { this.state='running'; return Promise.resolve(); }
+        close() { this.state='closed'; return Promise.resolve(); }
+        createMediaStreamSource() { return {connect(){},disconnect(){this.disconnected=true;}}; }
+        createScriptProcessor() {
+            if(capture.failProcessor) { capture.failProcessor=false; throw new Error('Capture setup failed'); }
+            const processor={connect(){},disconnect(){this.disconnected=true;}};
+            capture.processors.push(processor);
+            return processor;
+        }
         createGain() { return {connect(){},gain:{value:1,cancelScheduledValues(){},
             setValueAtTime(){},linearRampToValueAtTime(){}}}; }
         createBuffer(channels,length,rate) { return {duration:length/rate,copyToChannel(){}}; }
@@ -30,6 +47,8 @@ function setup() {
     }
     class Socket {
         static OPEN=1;
+        static CLOSING=2;
+        static CLOSED=3;
         constructor() { this.readyState=1; this.sent=[]; }
         send(raw) { this.sent.push(JSON.parse(raw)); }
         close() { this.readyState=3; }
@@ -40,8 +59,18 @@ function setup() {
         document:{getElementById(id){if(!elements.has(id))elements.set(id,element());return elements.get(id);},
             createElement:element,querySelectorAll(){return[];}},
         fetch:async()=>({ok:false,json:async()=>({detail:'No invitation'})}),
+        navigator:{mediaDevices:{async getUserMedia(){
+            capture.attempts++;
+            if(capture.wait) await capture.wait;
+            const track={label:'Test microphone',stopped:false,stop(){this.stopped=true;},
+                getSettings(){return {sampleRate:captureRate};}};
+            const stream={getAudioTracks(){return [track];},getTracks(){return [track];}};
+            capture.streams.push(stream);
+            return stream;
+        }}},
         WebSocket:Socket,AudioContext:AudioClock,
         atob:raw=>Buffer.from(raw,'base64').toString('binary'),
+        btoa:raw=>Buffer.from(raw,'binary').toString('base64'),
         setInterval(callback){const id=++timerId;intervals.set(id,callback);return id;},
         clearInterval(id){intervals.delete(id);},
         setTimeout(callback){const id=++timerId;timeouts.set(id,callback);return id;},
@@ -52,13 +81,126 @@ function setup() {
     vm.runInContext('sessionId="test-session"; playCtx=new AudioContext(); connectInterviewWebSocket();',context);
     const evaluate=code=>vm.runInContext(code,context);
     const clock=evaluate('playCtx'), socket=evaluate('ws');
-    return {clock,socket,elements,evaluate,
+    return {clock,socket,elements,evaluate,capture,
         message(msg){socket.onmessage({data:JSON.stringify(msg)});},
         tick(){for(const callback of [...intervals.values()])callback();},
         rows(){return elements.get('transcript')?.children || [];},
         flushTimeouts(){for(const callback of [...timeouts.values()])callback();timeouts.clear();}
     };
 }
+
+test('microphone double clicks create only one stream and one sending processor',async()=>{
+    const s=setup();
+    s.evaluate('ws=null; playCtx=null; document.getElementById("mic-select").value="test-mic";');
+    let release;
+    s.capture.wait=new Promise(resolve=>{release=resolve;});
+    const first=s.evaluate('prepareMicrophone()');
+    await s.evaluate('prepareMicrophone()');
+    assert.equal(s.elements.get('use-selected-mic').disabled,true);
+    release();await first;
+    assert.equal(s.capture.attempts,1);
+    assert.equal(s.capture.processors.length,1);
+    const socket=s.evaluate('ws'), processor=s.capture.processors[0];
+    const event={inputBuffer:{sampleRate:24000,getChannelData(){return new Float32Array(1024);}}};
+    processor.onaudioprocess(event);
+    assert.equal(socket.sent.length,0,'Opening playback must still gate microphone input');
+    s.evaluate('candidateAudioEnabled=true;');
+    processor.onaudioprocess(event);
+    assert.equal(socket.sent.length,1);
+    assert.equal(Buffer.from(socket.sent[0].data,'base64').length,2048);
+    await s.evaluate('prepareMicrophone()');
+    assert.equal(s.capture.attempts,1,'An active connection cannot be prepared twice');
+    socket.readyState=s.evaluate('WebSocket.CLOSING');
+    await s.evaluate('prepareMicrophone()');
+    assert.equal(s.capture.attempts,1,'Wait for an old connection to close before another setup');
+});
+
+test('a failed microphone attempt releases its track and audio context before retry',async()=>{
+    const s=setup();
+    s.evaluate('ws=null; playCtx=null; document.getElementById("mic-select").value="test-mic";');
+    s.capture.failProcessor=true;
+    await s.evaluate('prepareMicrophone()');
+    assert.equal(s.capture.streams[0].getTracks()[0].stopped,true);
+    assert.equal(s.capture.contexts.at(-1).state,'closed');
+    assert.equal(s.evaluate('captureCtx'),null);
+    assert.equal(s.evaluate('microphonePreparing'),false);
+    await s.evaluate('prepareMicrophone()');
+    assert.equal(s.capture.attempts,2);
+    assert.equal(s.capture.processors.length,1);
+    assert.equal(s.capture.streams[1].getTracks()[0].stopped,false);
+});
+
+test('a callback queued by an old capture cannot send into a new interview socket',async()=>{
+    const s=setup();
+    s.evaluate('ws=null; playCtx=null; document.getElementById("mic-select").value="test-mic";');
+    await s.evaluate('prepareMicrophone()');
+    const oldProcessor=s.capture.processors[0], callback=oldProcessor.onaudioprocess, oldSocket=s.evaluate('ws');
+    s.evaluate('ws.close();');
+    await s.evaluate('prepareMicrophone()');
+    const socket=s.evaluate('ws');
+    s.evaluate('candidateAudioEnabled=true;');
+    callback({inputBuffer:{sampleRate:24000,getChannelData(){return new Float32Array(1024);}}});
+    assert.equal(socket.sent.length,0);
+    assert.equal(oldProcessor.onaudioprocess,null);
+    assert.equal(oldProcessor.disconnected,true);
+    assert.equal(s.capture.streams[0].getTracks()[0].stopped,true);
+    oldSocket.onclose({code:1000,reason:'Old connection',wasClean:true});
+    assert.equal(s.evaluate('candidateAudioEnabled'),true,'An old close event cannot stop the new microphone');
+    assert.equal(s.capture.streams[1].getTracks()[0].stopped,false);
+});
+
+test('a device that cannot open at 24 kHz uses native capture and still sends 24 kHz',async()=>{
+    const s=setup({captureRate:48000});
+    s.capture.unsupportedRate=true;
+    s.evaluate('ws=null; playCtx=null; document.getElementById("mic-select").value="test-mic";');
+    await s.evaluate('prepareMicrophone()');
+    assert.equal(s.evaluate('captureCtx.sampleRate'),48000);
+    assert.equal(s.elements.get('mic-error').hidden,true);
+    s.evaluate('candidateAudioEnabled=true;');
+    s.capture.processors[0].onaudioprocess({inputBuffer:{sampleRate:48000,
+        getChannelData(){return new Float32Array(1024);}}});
+    const socket=s.evaluate('ws');
+    assert.equal(Buffer.from(socket.sent[0].data,'base64').length,1024);
+});
+
+for(const rate of [24000,44100,48000]) {
+    test(`capture at ${rate} Hz sends 24 kHz PCM16 without chunk-rounding drift`,async()=>{
+        const s=setup({captureRate:rate});
+        s.evaluate('ws=null; playCtx=null; document.getElementById("mic-select").value="test-mic";');
+        await s.evaluate('prepareMicrophone()');
+        const socket=s.evaluate('ws'), processor=s.capture.processors[0];
+        s.evaluate('candidateAudioEnabled=true;');
+        const sampleCount=rate*20;
+        for(let position=0;position<sampleCount;position+=1024) {
+            const samples=new Float32Array(Math.min(1024,sampleCount-position)).fill(0.25);
+            processor.onaudioprocess({inputBuffer:{sampleRate:rate,getChannelData(){return samples;}}});
+        }
+        const pcm=Buffer.concat(socket.sent.map(msg=>Buffer.from(msg.data,'base64')));
+        assert.equal(pcm.length,20*24000*2,'Duration must be preserved across chunk boundaries');
+        for(let position=0;position<pcm.length;position+=2) assert.equal(pcm.readInt16LE(position),8191);
+    });
+}
+
+test('fallback conversion preserves a speech-band tone across capture callbacks',()=>{
+    const s=setup();
+    for(const rate of [44100,48000]) {
+        const encoder=s.evaluate('new Pcm16StreamEncoder(24000)');
+        const buffers=[];
+        for(let offset=0;offset<rate;offset+=1024) {
+            const samples=Float32Array.from({length:Math.min(1024,rate-offset)},
+                (_,index)=>0.5*Math.sin(2*Math.PI*1000*(offset+index+0.5)/rate));
+            buffers.push(Buffer.from(encoder.encode(samples,rate)));
+        }
+        const pcm=Buffer.concat(buffers);
+        assert.equal(pcm.length,24000*2);
+        let squaredError=0;
+        for(let index=0;index<24000;index++) {
+            const expected=0.5*Math.sin(2*Math.PI*1000*(index+0.5)/24000);
+            squaredError+=(pcm.readInt16LE(index*2)/32768-expected)**2;
+        }
+        assert.ok(Math.sqrt(squaredError/24000)<0.01,'Low-frequency speech content must not change speed');
+    }
+});
 
 function audio(state,item='opening-audio',response='opening',seconds=0.2) {
     state.message({type:'audio',item_id:item,response_id:response,content_index:0,

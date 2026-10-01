@@ -26,6 +26,13 @@ class AccessError(Exception):
         self.status = status
 
 
+class AudioRateError(AccessError):
+    """A PCM throughput failure with counts, never microphone contents."""
+    def __init__(self, details):
+        super().__init__("Microphone audio exceeded the allowed streaming rate.", 429)
+        self.details = details
+
+
 def digest(value):
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
@@ -352,15 +359,21 @@ class AccessStore:
 
 
 class AudioBudget:
-    """Bound PCM16 input to real-time speed with ten seconds of network tolerance.
+    """Bound PCM16 input with ten seconds of burst and 2% clock tolerance.
 
     A wall-clock interview limit alone would still let a modified client upload
     hours of audio quickly. This token bucket checks bytes, not browser claims.
     """
+    PCM_BYTES_PER_SECOND = 24000 * 2
+    BURST_BYTES = PCM_BYTES_PER_SECOND * 10
+    REFILL_BYTES_PER_SECOND = PCM_BYTES_PER_SECOND * 1.02
+
     def __init__(self, clock=time.monotonic):
         self.clock = clock
         self.previous = clock()
-        self.credit = 48000 * 10  # 24,000 samples/sec x two bytes/sample.
+        self.credit = self.BURST_BYTES
+        self.started_at = None
+        self.accepted_bytes = 0
 
     def accept(self, encoded):
         if not isinstance(encoded, str) or len(encoded) > 128000:
@@ -372,8 +385,17 @@ class AudioBudget:
         if not pcm or len(pcm) % 2:
             raise AccessError("Invalid PCM16 microphone audio.")
         now = self.clock()
-        self.credit = min(48000 * 10, self.credit + max(0, now - self.previous) * 48000)
-        self.previous = now
+        if self.started_at is None:
+            self.started_at = now
+        self.credit = min(self.BURST_BYTES, self.credit + max(0, now - self.previous) * self.REFILL_BYTES_PER_SECOND)
+        self.previous = max(now, self.previous)
         if len(pcm) > self.credit:
-            raise AccessError("Microphone audio exceeded the allowed streaming rate.")
+            raise AudioRateError({
+                "audio_seconds_received": round(self.accepted_bytes / self.PCM_BYTES_PER_SECOND, 3),
+                "audio_stream_elapsed_ms": round(max(0, now - self.started_at) * 1000),
+                "audio_credit_seconds": round(self.credit / self.PCM_BYTES_PER_SECOND, 3),
+                "incoming_pcm_bytes": len(pcm),
+                "allowed_pcm_bytes_per_second": self.REFILL_BYTES_PER_SECOND,
+            })
         self.credit -= len(pcm)
+        self.accepted_bytes += len(pcm)

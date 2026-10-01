@@ -85,3 +85,31 @@ plus a real local Uvicorn HTTP/WebSocket smoke test with a simulated interviewer
 No OpenAI calls or real microphone interview were used. Browser rendering could
 not be verified because a compatible browser executable could not be installed.
 See [setup](docs/access_control_setup.md) and [design explanation](docs/access_control_explained.md).
+
+## 1 October 2026 — microphone streaming-rate rejection
+
+The reported relay log identifies `AccessError: Microphone audio exceeded the
+allowed streaming rate.` TalentSift's own byte budget stopped the interview;
+the old dashboard reported the generic connection-ended message. The supplied
+line lacks elapsed time and byte totals, so it does not establish which capture
+or timing condition caused this specific attempt.
+
+Guarded microphone preparation against overlapping clicks, released failed
+capture resources before retry, and rejected callbacks from replaced capture
+contexts and sockets. Actual input-buffer rates are converted to 24 kHz PCM16
+when necessary, retaining fractional intervals between chunks. Added a 2% refill
+margin while retaining the ten-second burst cap and rejection of sustained
+double-rate input. Rate failures now retain their specific reason and log the
+session ID, duration, elapsed time, credit and chunk byte counts without speech.
+
+Regression checks cover a full ten-minute stream with small timing drift, bounded
+network catch-up, accelerated input, the actual relay failure/cleanup path,
+microphone double clicks/retries, stale callbacks, native-rate fallback, PCM
+duration at 24/44.1/48 kHz and a speech-band test tone. Automated validation uses
+controlled clocks and simulated sockets, not a real microphone or paid OpenAI
+connection. No deployment or rewrite of old failed interview records was done.
+
+Validation passed: all 99 Python tests and 25 JavaScript tests, Python/inline
+JavaScript syntax, and whitespace checks. The original limiter was also compared
+with the fix using the same simulated clock-drift stream; only the fixed limiter
+accepted its full ten minutes. A real device interview remains to be retested.

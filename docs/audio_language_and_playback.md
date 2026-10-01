@@ -103,6 +103,44 @@ Those are potential follow-up experiments if measured final accuracy requires
 them. A completed transcription can still be wrong; recruiters should review
 unclear evidence instead of treating a recording failure as poor performance.
 
+## Microphone streaming-rate failure
+
+`Microphone audio exceeded the allowed streaming rate.` comes from TalentSift's
+own byte budget before audio reaches either paid stream. It does not establish
+an OpenAI outage or exhausted credit. The old generic dashboard message hid this
+reason. A partial log without elapsed time and PCM counts cannot establish
+whether duplicate capture, the sample rate, a large network burst or clock drift
+triggered the rejection.
+
+Microphone preparation is now guarded against overlapping clicks. A failed
+attempt stops its microphone tracks, disconnects its processor and closes its
+audio context before retry. Callbacks from a replaced context or WebSocket cannot
+send into or stop a newer capture pipeline. Recording finalization keeps the
+shared audio clock until its final chunk has been handled.
+
+The requested AudioContext rate remains 24 kHz, and Web Audio normally resamples
+the microphone into that context. A device reporting 48 kHz is not itself a
+failure. The callback uses `event.inputBuffer.sampleRate` to convert to 24 kHz
+PCM16, with averaging and fractional interval state for fallback capture rates
+such as 44.1 and 48 kHz. Conversion preserves duration; it is not a measured
+transcription accuracy improvement. No words or audio chunks are discarded to
+work around the server limit.
+
+The server keeps its ten-second burst allowance and adds a 2% refill margin for
+small timing differences. Sustained double-rate streams still fail. New failures
+use `audio_rate_exceeded` and retain the actual reason in the recruiter dashboard.
+`[relay] failed` includes `session_id`, `audio_seconds_received`,
+`audio_stream_elapsed_ms`, `audio_credit_seconds`, `incoming_pcm_bytes` and
+`allowed_pcm_bytes_per_second`; none contains speech content. Compare the audio
+duration with elapsed time to investigate any further rejection.
+
+Update the browser and server together, restart Uvicorn, refresh the candidate
+page and use a new invitation. Old failed records keep their historical status;
+they are not automatically changed to completed or given grades. Test a full
+interview and a double click during microphone preparation. If it still fails,
+save the complete `[relay] failed` line and the browser's logged **Capture
+AudioContext sample rate**. Never share your API key or invitation token.
+
 ## Validation limits
 
 Automated tests use controlled OpenAI events and browser audio clocks. They

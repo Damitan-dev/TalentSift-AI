@@ -22,7 +22,7 @@ from models import (
     utc_now,
 )
 from pydantic import BaseModel, ConfigDict
-from access_control import AccessStore, AccessError, AudioBudget
+from access_control import AccessStore, AccessError, AudioBudget, AudioRateError
 from access_routes import install_access_routes
 from dotenv import load_dotenv
 
@@ -2233,15 +2233,22 @@ async def interview_relay(ws_browser: WebSocket, session_id: str):
     except Exception as error:
         details = connection_failure_details(error)
         details.update(relay_stats)
+        details["session_id"] = session_id
+        audio_rate_failure = isinstance(error, AudioRateError)
+        if audio_rate_failure:
+            details.update(error.details)
         details["elapsed_ms"] = round((time.monotonic() - relay_started_at) * 1000)
         print("[relay] failed " + json.dumps(details, ensure_ascii=False))
         billing = is_billing_failure(error)
-        failure_code = "billing_unavailable" if billing else "connection_lost"
+        failure_code = ("audio_rate_exceeded" if audio_rate_failure else
+                        "billing_unavailable" if billing else "connection_lost")
         try:
             failed_session = load_session(session_id)
             if failed_session.status == "in_progress":
                 failed_session.status = "failed"
                 failed_session.failure_reason = (
+                    "Microphone audio exceeded the allowed streaming rate."
+                    if audio_rate_failure else
                     "Interview service billing is unavailable."
                     if billing else "Interview connection ended unexpectedly."
                 )
@@ -2255,6 +2262,8 @@ async def interview_relay(ws_browser: WebSocket, session_id: str):
                 await asyncio.wait_for(ws_browser.send_json({
                     "type": "interview_error", "code": failure_code,
                     "message": (
+                        "Microphone audio was arriving faster than the interview could accept. This interview has stopped. Refresh the page and contact the recruiter for a new invitation."
+                        if audio_rate_failure else
                         "The interview service is unavailable. Please contact the recruiter or try later."
                         if billing else
                         "The connection to the interviewer was lost. This interview has stopped. Contact the recruiter for a new invitation."
@@ -2264,7 +2273,8 @@ async def interview_relay(ws_browser: WebSocket, session_id: str):
                 pass  # The browser may already have disconnected.
             try:
                 await asyncio.wait_for(
-                    ws_browser.close(code=1011, reason="Interview service unavailable"), timeout=3
+                    ws_browser.close(code=1008 if audio_rate_failure else 1011,
+                                     reason="Microphone streaming rate exceeded" if audio_rate_failure else "Interview service unavailable"), timeout=3
                 )
             except Exception:
                 pass

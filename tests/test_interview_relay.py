@@ -359,6 +359,55 @@ def test_primary_disconnect_stops_both_pumps_and_marks_failed(ending, tmp_path, 
     asyncio.run(scenario())
 
 
+def test_audio_rate_failure_keeps_the_real_reason_and_cleans_up(tmp_path, monkeypatch, capsys):
+    import base64
+    from access_control import AudioBudget
+    app, session = configure_relay(tmp_path, monkeypatch)
+    now = [0.0]
+    monkeypatch.setattr(app, 'AudioBudget', lambda: AudioBudget(clock=lambda: now[0]))
+
+    async def scenario():
+        engine, browser = Socket(), Browser()
+        @asynccontextmanager
+        async def connect(config):
+            yield engine
+        monkeypatch.setattr(app, 'connect_to_engine_with_retry', connect)
+        task = asyncio.create_task(app.interview_relay(browser, session.id))
+        try:
+            opening = await message(engine, 'response.create')
+            await engine.emit({'type': 'response.created', 'response': {
+                'id': 'opening', 'metadata': opening['response']['metadata']}})
+            await engine.emit({'type': 'response.output_audio.delta', 'response_id': 'opening',
+                               'item_id': 'hello', 'delta': 'AAA='})
+            await engine.emit({'type': 'response.done', 'response': {
+                'id': 'opening', 'status': 'completed', 'output': []}})
+            await message(browser, 'opening_generated')
+            await browser.emit({'type': 'opening_playback_finished', 'response_id': 'opening'})
+            await message(browser, 'interview_timer_started')
+            second = base64.b64encode(bytes(48000)).decode()
+            for _ in range(10):
+                await browser.emit({'type': 'audio', 'data': second})
+                await message(engine, 'input_audio_buffer.append')
+            await browser.emit({'type': 'audio', 'data': second})
+            failure = await message(browser, 'interview_error')
+            await asyncio.wait_for(task, 2)
+            assert failure['code'] == 'audio_rate_exceeded'
+            assert 'Microphone audio' in failure['message']
+            assert session.failure_reason == 'Microphone audio exceeded the allowed streaming rate.'
+            assert session.status == 'failed'
+            assert browser.close_code == 1008
+            assert not [t for t in asyncio.all_tasks() if t.get_name().startswith('interview:')]
+            output = capsys.readouterr().out
+            assert '"session_id": "playback-check"' in output
+            assert '"incoming_pcm_bytes": 48000' in output
+            assert '"audio_seconds_received": 10.0' in output
+            assert second not in output
+        finally:
+            if not task.done(): task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize('ending', ['candidate_stop', 'time_limit'])
 def test_incomplete_coverage_does_not_block_explicit_stop_or_deadline(ending, tmp_path, monkeypatch, capsys):
     monkeypatch.setenv('OPENAI_API_KEY', 'unused-test-value')
