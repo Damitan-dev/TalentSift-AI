@@ -7,6 +7,7 @@ from pathlib import Path
 
 import websockets
 from live_captions import LiveCaptionRelay
+from transcription_config import build_transcription_settings, interview_language
 from recording_routes import router as recording_router
 from recording_storage import recording_store, RecordingError
 from interview_turns import InterviewTurns, FinalTranscripts, build_turn_detection
@@ -240,10 +241,7 @@ def build_instructions(
     #
     # "en" -> "English"
     # "fr" -> "French"
-    language_name = LANGUAGE_NAMES.get(
-        language_code,
-        "English",
-    )
+    language_name = LANGUAGE_NAMES[interview_language(language_code)]
 
 
     # Our interviewer prompt already contains:
@@ -311,7 +309,7 @@ async def health():
 # BUILD OPENAI REALTIME SESSION CONFIG
 # ---------------------------------------------------------
 
-def build_session_config(language_code: str):
+def build_session_config(language_code: str, *, candidate_name=None, job_title=None):
     """
     Build the session.update event that tells OpenAI
     how this realtime interview session should behave.
@@ -348,15 +346,10 @@ def build_session_config(language_code: str):
 
                     # Ask OpenAI to turn candidate
                     # speech into text.
-                    "transcription": {
-                    # TalentSift prioritizes accurate final interview
-                    # evidence over instant live captions.
-                    "model": "gpt-transcribe",
-
-                    "language": 
-                        language_code
-                    ,
-                },
+                    "transcription": build_transcription_settings(
+                        language_code, "gpt-transcribe",
+                        candidate_name=candidate_name, job_title=job_title,
+                    ),
 
                     # Server-side Voice Activity Detection.
                     #
@@ -755,9 +748,16 @@ async def interview_relay(ws_browser: WebSocket, session_id: str):
         # BUILD THE OPENAI SESSION CONFIG ONCE
         # ---------------------------------------------
 
-        session_config = build_session_config(
-            session.language
-        )
+        session_language = interview_language(session.language)
+        candidate = (await asyncio.to_thread(load_candidate, session.candidate_id)
+                     if getattr(session, "candidate_id", None) else None)
+        job = (await asyncio.to_thread(load_job, session.job_id)
+               if getattr(session, "job_id", None) else None)
+        recognition_context = {
+            "candidate_name": getattr(candidate, "full_name", None),
+            "job_title": getattr(job, "title", None),
+        }
+        session_config = build_session_config(session_language, **recognition_context)
 
 
         print(
@@ -811,8 +811,11 @@ async def interview_relay(ws_browser: WebSocket, session_id: str):
                 "opening_complete": False,
                 "opening_generated": False,
                 "closing_generated": False,
+                "closing_response_id": None,
                 "awaiting_opening_response": False,
                 "opening_response_id": None,
+                "opening_audio_items": set(),
+                "audio_items_by_response": {},
 
                 # True once the hard 10-minute interview
                 # window has been reached.
@@ -826,7 +829,7 @@ async def interview_relay(ws_browser: WebSocket, session_id: str):
                 "timer_task": None,
             }
 
-            coverage = InterviewCoverage(session.language)
+            coverage = InterviewCoverage(session_language)
             handled_tool_calls = set()
             interview_state["clock_started_at"] = None
 
@@ -856,10 +859,11 @@ async def interview_relay(ws_browser: WebSocket, session_id: str):
             live_captions = LiveCaptionRelay(
                 ws_browser,
                 OPENAI_API_KEY,
-                session.language,
+                session_language,
                 enabled=os.getenv(
                     "TALENTSIFT_LIVE_CAPTIONS", "1"
                 ).lower() not in ("0", "false", "off"),
+                **recognition_context,
             )
 
 
@@ -1077,7 +1081,9 @@ async def interview_relay(ws_browser: WebSocket, session_id: str):
                             msg_type
                             == "opening_playback_finished"
                         ):
-                            if not interview_state["opening_generated"]:
+                            if (not interview_state["opening_generated"]
+                                    or interview_state["opening_complete"]
+                                    or msg.get("response_id") != interview_state["opening_response_id"]):
                                 continue
 
                             # The candidate may have clicked
@@ -1322,7 +1328,8 @@ async def interview_relay(ws_browser: WebSocket, session_id: str):
                             == "closing_playback_finished"
                         ):
 
-                            if not interview_state["closing_generated"]:
+                            if (not interview_state["closing_generated"]
+                                    or msg.get("response_id") != interview_state["closing_response_id"]):
                                 continue  # Only the server may initiate interview completion.
                             print(
                                 "🏁 Candidate reached end of closing"
@@ -1555,6 +1562,7 @@ async def interview_relay(ws_browser: WebSocket, session_id: str):
                         if awaiting_closing_response:
 
                             closing_response_id = response_id
+                            interview_state["closing_response_id"] = response_id
 
                             awaiting_closing_response = False
 
@@ -1609,6 +1617,12 @@ async def interview_relay(ws_browser: WebSocket, session_id: str):
                             "id"
                         )
 
+                        await ws_browser.send_json({
+                            "type": "response_finished", "response_id": response_id,
+                            "status": response_data.get("status"),
+                            "item_ids": sorted(interview_state["audio_items_by_response"].get(response_id, set())),
+                        })
+
 
                         if (
                         interview_state[
@@ -1620,6 +1634,10 @@ async def interview_relay(ws_browser: WebSocket, session_id: str):
                                 ]
                         ):
 
+                            if response_data.get("status") != "completed":
+                                raise RuntimeError("Bianca's opening did not complete successfully")
+                            if not interview_state["opening_audio_items"]:
+                                raise RuntimeError("Bianca's opening contained no playable audio")
                             interview_state["opening_generated"] = True
                             print(
                                 "✅ Opening response fully generated"
@@ -1630,14 +1648,12 @@ async def interview_relay(ws_browser: WebSocket, session_id: str):
                                 {
                                     "type":
                                         "opening_generated",
+                                    "response_id": response_id,
+                                    "item_ids": sorted(interview_state["opening_audio_items"]),
                                 }
                             )
 
-                            # We no longer need to keep this ID
-                            # after the opening has completed.
-                            interview_state[
-                                "opening_response_id"
-                            ] = None
+                            # Keep the ID to reject stale or duplicate playback acknowledgements.
 
 
 
@@ -1646,6 +1662,12 @@ async def interview_relay(ws_browser: WebSocket, session_id: str):
                             closing_response_id
                             and response_id == closing_response_id
                         ):
+
+                            if response_data.get("status") != "completed":
+                                raise RuntimeError("Bianca's closing did not complete successfully")
+                            closing_items = interview_state["audio_items_by_response"].get(response_id, set())
+                            if not closing_items:
+                                raise RuntimeError("Bianca's closing contained no playable audio")
 
                             interview_state["closing_generated"] = True
                             print(
@@ -1663,6 +1685,8 @@ async def interview_relay(ws_browser: WebSocket, session_id: str):
                                 {
                                     "type":
                                         "closing_generated",
+                                    "response_id": response_id,
+                                    "item_ids": sorted(closing_items),
                                 }
                             )
 
@@ -1755,7 +1779,7 @@ async def interview_relay(ws_browser: WebSocket, session_id: str):
                             # -----------------------------------------
 
                             closing_text = CLOSING_MESSAGES.get(
-                                current_session.language,
+                                session_language,
                                 CLOSING_MESSAGES["en"],
                             )
 
@@ -1857,6 +1881,12 @@ async def interview_relay(ws_browser: WebSocket, session_id: str):
 
 
                         if audio_b64:
+                            if not event.get("item_id") or not event.get("response_id"):
+                                raise RuntimeError("Bianca audio did not include its message identity")
+                            interview_state["audio_items_by_response"].setdefault(
+                                event["response_id"], set()).add(event["item_id"])
+                            if event.get("response_id") == interview_state["opening_response_id"]:
+                                interview_state["opening_audio_items"].add(event.get("item_id"))
 
                             # Translate OpenAI's event:
                             #
@@ -1877,6 +1907,7 @@ async def interview_relay(ws_browser: WebSocket, session_id: str):
                                      # Identifies WHICH Bianca message
                                     # this audio belongs to.
                                     "item_id": event.get("item_id"),
+                                    "response_id": event.get("response_id"),
 
                                     # Normally 0 for the audio content
                                     # we are currently using.
@@ -1891,32 +1922,13 @@ async def interview_relay(ws_browser: WebSocket, session_id: str):
                     # LIVE BIANCA TRANSCRIPT PIECE
                     # ---------------------------------
                     #
-                    # This arrives while Bianca is still
-                    # speaking.
-                    # elif (
-                    #     event_type
-                    #     == "response.output_audio_transcript.delta"
-                    # ):
-
-                    #     # "delta" is only the newest little
-                    #     # piece of Bianca's transcript.
-                    #     delta_text = event.get(
-                    #         "delta",
-                    #         "",
-                    #     )
-
-
-                    #     if delta_text:
-
-                    #         # Translate OpenAI's detailed event
-                    #         # into our simpler TalentSift message.
-                    #         await ws_browser.send_json(
-                    #             {
-                    #                 "type": "transcript_delta",
-                    #                 "speaker": "interviewer",
-                    #                 "text": delta_text,
-                    #             }
-                    #         )
+                    elif event_type == "response.output_audio_transcript.delta":
+                        if turns.response_allowed(event) and event.get("delta"):
+                            await ws_browser.send_json({
+                                "type": "transcript_delta", "speaker": "interviewer",
+                                "text": event["delta"], "item_id": event.get("item_id"),
+                                "response_id": event.get("response_id"),
+                            })
 
                     # ---------------------------------
                     # BIANCA COMPLETED TRANSCRIPT
@@ -1968,6 +1980,8 @@ async def interview_relay(ws_browser: WebSocket, session_id: str):
                                     "type": "transcript",
                                     "speaker": "interviewer",
                                     "text": interviewer_text,
+                                    "item_id": event.get("item_id"),
+                                    "response_id": event.get("response_id"),
                                 }
                             )
 
@@ -2111,7 +2125,7 @@ async def interview_relay(ws_browser: WebSocket, session_id: str):
                         coverage.speech_started(event.get("item_id"))
                         await turns.speech_started(event.get("item_id"))
                         # Stop queued playback when the engine cancels its response.
-                        await ws_browser.send_json({"type": "interrupt"})
+                        await ws_browser.send_json({"type": "interrupt", "response_id": turns.active_id})
                         await live_captions.speech_started(event.get("item_id"))
                         print("🎤 Candidate started speaking")
                         await ws_browser.send_json({"type": "status", "value": "listening"})

@@ -32,8 +32,8 @@ and to an optional `gpt-live-transcribe` transcription-only socket. The live
 socket uses `turn_detection: null` and receives the main interview's speech
 start/stop item IDs. It emits provisional `transcript_delta` messages as audio
 arrives. At speech stop, the relay commits the live buffer. The original
-`gpt-transcribe` completion saves the official candidate transcript and asks
-Bianca for the next response. If live transcription fails, the interview keeps
+`gpt-transcribe` completion saves the official candidate transcript. Bianca's
+reply scheduler uses committed audio independently of transcription. If live transcription fails, the interview keeps
 running and the completed transcript still appears. The second audio stream
 adds transcription usage and cost.
 
@@ -42,11 +42,13 @@ interview also has its own `near_field`/`far_field` server setting; the live
 preview does not inherit that setting, so its temporary words may differ in
 noise. Judge accuracy using the saved final transcript.
 
-The main session keeps `server_vad`, `silence_duration_ms: 1500`, and
-`create_response: false`. Do not put `gpt-live-transcribe` into that main
-session's `transcription.model`: it has no server VAD. In this implementation,
-Bianca replies only when the main session emits a nonempty completed candidate
-transcript.
+The main session uses semantic VAD by default and keeps `create_response: false`.
+The optional `server_vad` mode has a 1500 ms silence threshold. Do not put
+`gpt-live-transcribe` into that main session's `transcription.model`: it requires
+no server VAD. The app's reply scheduler does not wait for the saved transcript.
+
+See [language and playback fixes](audio_language_and_playback.md) for the current
+caption identity handling and opening/closing playback acknowledgements.
 
 ## Settings
 
@@ -54,14 +56,14 @@ Add these optional lines to the server's `.env`, then restart the server:
 
 ```text
 TALENTSIFT_LIVE_CAPTIONS=1
-TALENTSIFT_CAPTION_DELAY=medium
+TALENTSIFT_CAPTION_DELAY=low
 TALENTSIFT_NOISE_PROFILE=near_field
 ```
 
 | Setting | Choices | Use |
 | --- | --- | --- |
 | `TALENTSIFT_LIVE_CAPTIONS` | `1` (default), `0` | Turn the optional preview stream on or off. |
-| `TALENTSIFT_CAPTION_DELAY` | `minimal`, `low`, `medium` (default), `high`, `xhigh` | Lower shows words sooner; higher lets the live model use more context. Test `low` versus `medium` with real voices and noise. |
+| `TALENTSIFT_CAPTION_DELAY` | `minimal`, `low` (default), `medium`, `high`, `xhigh` | Lower shows words sooner; higher lets the live model use more context. Test `low` versus `medium` with real voices and noise. |
 | `TALENTSIFT_NOISE_PROFILE` | `near_field` (default), `far_field` | Use `near_field` for a close headset mic; `far_field` for a laptop or room mic. This configures the **main** interview socket in `app.py`. |
 
 The browser already requests `echoCancellation`, `noiseSuppression`, and
@@ -81,18 +83,17 @@ as RNNoise can reduce harder background sounds, but compare recordings before
 adding one: aggressive processing can erase soft consonants or make the VAD
 miss short replies. Avoid stacking another processor without an A/B test.
 
-For specialized vocabulary, the live model supports `prompt` and `keywords`
-in `session.audio.input.transcription` in `live_captions.py`. Use a short,
-neutral recording description and literal names or acronyms relevant to the
-role; do not provide expected interview answers. The selected interview
-language is already passed as `languages: ["en"]` or `["fr"]`. The saved
-transcript comes from the main session, so a hint added only to the live
-preview will not improve the saved text. Change and validate the main session
-separately if you later decide to add hints there.
+Both transcribers now get language and recognition context from
+`transcription_config.py`. Each uses exactly one expected language, `languages:
+["en"]` or `["fr"]`, a neutral prompt in that language, and literal hints for
+the recruiter-supplied candidate name and job title. Do not provide expected
+interview answers. A language hint does not guarantee recognition or translate
+speech. Preserve actual words if a candidate switches languages.
 
 ## Diagnose short replies and missing Bianca responses
 
-After saying “yes,” allow the 1.5 second VAD silence period. Inspect the
+After saying “yes,” allow the main VAD to finish the turn. In optional
+`server_vad` mode this includes a 1.5 second silence period. Inspect the
 server output in order:
 
 1. `🎤 Candidate started speaking`: microphone audio reached main VAD. If

@@ -413,6 +413,11 @@ AI-assisted evaluation outputs.
 
 ## Interview turn timing
 
+The [language, live-caption and playback guide](docs/audio_language_and_playback.md)
+explains how the selected English/French language reaches both transcribers,
+how provisional text is reconciled with the saved transcript, and how opening
+and closing wait for actual browser audio-source completion.
+
 For candidate interruptions or slow replies, see [the timing update and tuning
 guide](docs/turn_timing.md). The primary interview now uses semantic turn detection
 and replies from committed audio without waiting for the final transcript.

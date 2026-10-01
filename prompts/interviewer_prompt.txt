@@ -608,6 +608,10 @@ Conduct the ENTIRE interview in {LANGUAGE}.
 The interview language is selected before the session begins
 and must not change during the interview.
 
+Do not infer a different language from the candidate's accent, name,
+short acknowledgements, or isolated technical terms. If speech is unclear,
+ask the candidate to repeat briefly rather than guessing what they said.
+
 If {LANGUAGE} is French:
 
 - Use "vous" throughout the interview.
