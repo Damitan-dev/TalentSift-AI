@@ -113,3 +113,27 @@ Validation passed: all 99 Python tests and 25 JavaScript tests, Python/inline
 JavaScript syntax, and whitespace checks. The original limiter was also compared
 with the fix using the same simulated clock-drift stream; only the fixed limiter
 accepted its full ten minutes. A real device interview remains to be retested.
+
+## 1 October 2026 — isolate an abrupt OpenAI connection loss
+
+A later affected-device log forwarded 209 candidate chunks, then raised
+`ConnectionClosedError: no close frame received or sent`. This is a different
+exception from the microphone byte-budget rejection. The log includes the new
+session-ID diagnostic. The user reports a phone hotspot, no detected proxy and
+websockets 16.1; the test environment and requirements use 17.1. None of those
+facts identifies the device or service responsible for the abrupt closure.
+
+Added `check_realtime_connection.py`, an isolated single-socket check with the
+interview model and connection settings. It sends no audio or response requests,
+does not import the app or consume invitations, and requires configuration
+acceptance plus a fresh pong after its observation interval. It logs bounded,
+redacted metadata and cleans up on failure or cancellation. Added the connection
+diagnostic guide, including the limits of an idle-connection pass and the need
+to preserve conversation state before adding mid-interview recovery.
+
+Validation: 14 diagnostic tests passed for ready acknowledgement, abrupt/clean
+early closes, handshake failure, provider rejection, unanswered ping, cancellation,
+missing configuration acknowledgement, unexpected responses, credential
+redaction, missing keys and bounded CLI input.
+No authenticated OpenAI connection was made in this environment. The next step
+is the checker on the affected computer; this is not a confirmed network repair.

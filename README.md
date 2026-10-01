@@ -273,6 +273,17 @@ Developers who also need the older local Python audio tools can install:
 python -m pip install -r requirements-local-audio.txt
 ```
 
+For an unexpected interview disconnect, run the isolated connection diagnostic
+with the virtual environment active:
+
+```bash
+python check_realtime_connection.py
+```
+
+It sends no microphone audio or response requests and reports redacted connection
+metadata. See [connection failure diagnosis](docs/connection_failures.md) for
+how to run it and interpret its limits.
+
 Create a local `.env` file:
 
 ```text
