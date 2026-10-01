@@ -85,3 +85,55 @@ plus a real local Uvicorn HTTP/WebSocket smoke test with a simulated interviewer
 No OpenAI calls or real microphone interview were used. Browser rendering could
 not be verified because a compatible browser executable could not be installed.
 See [setup](docs/access_control_setup.md) and [design explanation](docs/access_control_explained.md).
+
+## 1 October 2026 — microphone streaming-rate rejection
+
+The reported relay log identifies `AccessError: Microphone audio exceeded the
+allowed streaming rate.` TalentSift's own byte budget stopped the interview;
+the old dashboard reported the generic connection-ended message. The supplied
+line lacks elapsed time and byte totals, so it does not establish which capture
+or timing condition caused this specific attempt.
+
+Guarded microphone preparation against overlapping clicks, released failed
+capture resources before retry, and rejected callbacks from replaced capture
+contexts and sockets. Actual input-buffer rates are converted to 24 kHz PCM16
+when necessary, retaining fractional intervals between chunks. Added a 2% refill
+margin while retaining the ten-second burst cap and rejection of sustained
+double-rate input. Rate failures now retain their specific reason and log the
+session ID, duration, elapsed time, credit and chunk byte counts without speech.
+
+Regression checks cover a full ten-minute stream with small timing drift, bounded
+network catch-up, accelerated input, the actual relay failure/cleanup path,
+microphone double clicks/retries, stale callbacks, native-rate fallback, PCM
+duration at 24/44.1/48 kHz and a speech-band test tone. Automated validation uses
+controlled clocks and simulated sockets, not a real microphone or paid OpenAI
+connection. No deployment or rewrite of old failed interview records was done.
+
+Validation passed: all 99 Python tests and 25 JavaScript tests, Python/inline
+JavaScript syntax, and whitespace checks. The original limiter was also compared
+with the fix using the same simulated clock-drift stream; only the fixed limiter
+accepted its full ten minutes. A real device interview remains to be retested.
+
+## 1 October 2026 — isolate an abrupt OpenAI connection loss
+
+A later affected-device log forwarded 209 candidate chunks, then raised
+`ConnectionClosedError: no close frame received or sent`. This is a different
+exception from the microphone byte-budget rejection. The log includes the new
+session-ID diagnostic. The user reports a phone hotspot, no detected proxy and
+websockets 16.1; the test environment and requirements use 17.1. None of those
+facts identifies the device or service responsible for the abrupt closure.
+
+Added `check_realtime_connection.py`, an isolated single-socket check with the
+interview model and connection settings. It sends no audio or response requests,
+does not import the app or consume invitations, and requires configuration
+acceptance plus a fresh pong after its observation interval. It logs bounded,
+redacted metadata and cleans up on failure or cancellation. Added the connection
+diagnostic guide, including the limits of an idle-connection pass and the need
+to preserve conversation state before adding mid-interview recovery.
+
+Validation: 14 diagnostic tests passed for ready acknowledgement, abrupt/clean
+early closes, handshake failure, provider rejection, unanswered ping, cancellation,
+missing configuration acknowledgement, unexpected responses, credential
+redaction, missing keys and bounded CLI input.
+No authenticated OpenAI connection was made in this environment. The next step
+is the checker on the affected computer; this is not a confirmed network repair.

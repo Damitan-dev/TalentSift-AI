@@ -12,6 +12,7 @@ import os
 
 import websockets
 from relay_lifecycle import run_relay_pair
+from transcription_config import build_transcription_settings, interview_language
 
 
 LIVE_CAPTIONS_URL = os.getenv(
@@ -22,13 +23,18 @@ CAPTION_DELAYS = {"minimal", "low", "medium", "high", "xhigh"}
 
 
 class LiveCaptionRelay:
-    def __init__(self, browser_ws, api_key: str, language: str, enabled=True):
+    def __init__(self, browser_ws, api_key: str, language: str, enabled=True,
+                 *, candidate_name=None, job_title=None):
         self.browser_ws = browser_ws
         self.api_key = api_key
-        self.language = language
+        self.language = interview_language(language)
         self.enabled = enabled
-        configured_delay = os.getenv("TALENTSIFT_CAPTION_DELAY", "medium").lower()
-        self.delay = configured_delay if configured_delay in CAPTION_DELAYS else "medium"
+        configured_delay = os.getenv("TALENTSIFT_CAPTION_DELAY", "low").lower()
+        self.delay = configured_delay if configured_delay in CAPTION_DELAYS else "low"
+        self.transcription = build_transcription_settings(
+            self.language, "gpt-live-transcribe", candidate_name=candidate_name,
+            job_title=job_title, delay=self.delay,
+        )
         self.queue = asyncio.Queue(maxsize=128)
         self.task = None
         self.ready = False
@@ -38,6 +44,7 @@ class LiveCaptionRelay:
         self.commits_waiting_for_id = deque()
         self.pending_commits = 0
         self.finalized_primary_items = set()
+        self.previewed_live_items = set()
 
     def start(self):
         if self.enabled:
@@ -52,14 +59,16 @@ class LiveCaptionRelay:
 
     def offer_audio(self, audio_b64: str):
         """Do not let optional captions delay the interview's audio stream."""
-        if not self.ready:
+        # Retain a bounded startup buffer while the optional socket configures.
+        if not self.ready and (self.task is None or self.task.done()):
             return
         try:
             self.queue.put_nowait(("audio", audio_b64))
         except asyncio.QueueFull:
             print("⚠️ Live captions fell behind; using final transcript only")
             self.ready = False
-            self.task.cancel()
+            if self.task is not None:
+                self.task.cancel()
 
     async def speech_started(self, primary_item_id: str | None):
         # The main interview VAD assigns the item ID used by its final text.
@@ -70,7 +79,7 @@ class LiveCaptionRelay:
     def speech_stopped(self, primary_item_id: str | None):
         if self.current_primary_item == primary_item_id:
             self.current_primary_item = None
-        if self.ready and primary_item_id:
+        if primary_item_id and (self.ready or (self.task and not self.task.done())):
             try:
                 self.queue.put_nowait(("commit", primary_item_id))
                 # A later speech start can precede the live socket's commit ack.
@@ -78,7 +87,8 @@ class LiveCaptionRelay:
             except asyncio.QueueFull:
                 print("⚠️ Live captions fell behind; using final transcript only")
                 self.ready = False
-                self.task.cancel()
+                if self.task is not None:
+                    self.task.cancel()
 
     def final_transcript_arrived(self, primary_item_id: str | None):
         if primary_item_id:
@@ -97,8 +107,14 @@ class LiveCaptionRelay:
     async def _flush_pending(self, live_item_id: str):
         primary_id = self.primary_by_live_item.get(live_item_id)
         if primary_id:
-            for text in self.pending_by_live_item.pop(live_item_id, []):
-                await self._forward_delta(primary_id, text)
+            self.pending_by_live_item.pop(live_item_id, None)
+            if live_item_id in self.previewed_live_items:
+                await self.browser_ws.send_json({
+                    "type": "transcript_link",
+                    "provisional_item_id": "live:" + live_item_id,
+                    "item_id": primary_id,
+                })
+                self.previewed_live_items.discard(live_item_id)
 
     async def _claim_pending(self, primary_item_id: str):
         for live_item_id in list(self.pending_by_live_item):
@@ -132,14 +148,17 @@ class LiveCaptionRelay:
                 if primary_id:
                     await self._forward_delta(primary_id, text)
                 else:
-                    # A first caption may beat the interview VAD start event.
+                    # Display immediately, then reconcile with the main VAD ID.
                     pending = self.pending_by_live_item.setdefault(live_id, [])
                     if sum(map(len, pending)) < 4000:
                         pending.append(text)
+                        self.previewed_live_items.add(live_id)
+                        await self._forward_delta("live:" + live_id, text)
 
             elif kind == "conversation.item.input_audio_transcription.completed":
                 # The main interview stream supplies the final saved text.
-                self.pending_by_live_item.pop(live_id, None)
+                if live_id in self.primary_by_live_item:
+                    self.pending_by_live_item.pop(live_id, None)
 
             elif kind == "error":
                 detail = event.get("error", {})
@@ -182,11 +201,7 @@ class LiveCaptionRelay:
                         "type": "transcription",
                         "audio": {"input": {
                             "format": {"type": "audio/pcm", "rate": 24000},
-                            "transcription": {
-                                "model": "gpt-live-transcribe",
-                                "languages": [self.language],
-                                "delay": self.delay,
-                            },
+                            "transcription": self.transcription,
                             "turn_detection": None,
                         }},
                     },
@@ -219,3 +234,13 @@ class LiveCaptionRelay:
             print("⚠️ Live captions unavailable; final transcripts remain:", error)
         finally:
             self.ready = False
+            # If this optional socket fails before IDs are linked, its previews
+            # must not remain beside the authoritative final transcript.
+            for live_item_id in list(self.previewed_live_items):
+                try:
+                    await self.browser_ws.send_json({
+                        "type": "transcript_retract", "item_id": "live:" + live_item_id,
+                    })
+                except Exception:
+                    break  # The browser may already be disconnected.
+            self.previewed_live_items.clear()

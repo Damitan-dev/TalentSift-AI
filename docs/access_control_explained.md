@@ -140,10 +140,19 @@ interview timer from starting.
 
 There is also a microphone byte budget. At 24,000 PCM16 samples per second,
 normal mono input is `24,000 × 2 = 48,000 bytes/second`. A token bucket replenishes
-that much credit per second and permits ten seconds of accumulated buffering.
+48,960 bytes of credit per second (a 2% clock margin) and permits a bounded
+480,000-byte burst (ten seconds of normal PCM16 audio). Browser capture converts
+to 24 kHz using the actual audio-buffer rate and keeps fractional samples across
+chunks; microphone preparation permits only one active capture pipeline.
 A modified client cannot send an hour of audio immediately and claim it was a
 short interview. This budget runs before audio is forwarded to either paid
 stream.
+
+A rate-budget rejection is recorded as a microphone streaming-rate failure,
+rather than a generic lost connection. Its terminal log contains the session ID,
+accepted audio duration, elapsed stream time, available credit and rejected chunk
+size. It never includes microphone contents. The margin handles small clock
+differences; it does not permit sustained double-rate audio or unlimited uploads.
 
 A concurrent-slot lease has a deadline. If the server process crashes, normal
 cleanup cannot run. Once that deadline passes, the next usage/admission check

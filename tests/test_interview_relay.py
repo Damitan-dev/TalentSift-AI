@@ -11,6 +11,18 @@ import pytest
 from interview_coverage import TOPICS
 
 
+def configure_relay(tmp_path, monkeypatch):
+    monkeypatch.setenv('OPENAI_API_KEY', 'unused-test-value')
+    monkeypatch.setenv('TALENTSIFT_LIVE_CAPTIONS', '0')
+    monkeypatch.setenv('TALENTSIFT_DATA_DIR', str(tmp_path))
+    app = importlib.import_module('app')
+    session = SimpleNamespace(id='playback-check', status='pending', started_at=None, language='en')
+    monkeypatch.setattr(app, 'load_session', lambda _: session)
+    monkeypatch.setattr(app, 'save_session', lambda _: None)
+    monkeypatch.setattr(app, 'save_transcript_turn', lambda *_: None)
+    return app, session
+
+
 class Socket:
     def __init__(self):
         self.incoming = asyncio.Queue()
@@ -58,14 +70,93 @@ async def message(socket, kind):
                 return event
 
 
+@pytest.mark.parametrize('status, audio_present', [('cancelled', True), ('failed', True), ('completed', False)])
+def test_unsuccessful_or_empty_opening_cannot_enable_candidate_audio(status, audio_present, tmp_path, monkeypatch):
+    app, session = configure_relay(tmp_path, monkeypatch)
+
+    async def scenario():
+        engine, browser = Socket(), Browser()
+        @asynccontextmanager
+        async def connect(config):
+            yield engine
+        monkeypatch.setattr(app, 'connect_to_engine_with_retry', connect)
+        task = asyncio.create_task(app.interview_relay(browser, session.id))
+        try:
+            request = await message(engine, 'response.create')
+            await engine.emit({'type': 'response.created', 'response': {
+                'id': 'opening', 'metadata': request['response']['metadata']}})
+            if audio_present:
+                await engine.emit({'type': 'response.output_audio.delta', 'response_id': 'opening',
+                                   'item_id': 'hello', 'delta': 'AAA='})
+            await engine.emit({'type': 'response.done', 'response': {
+                'id': 'opening', 'status': status, 'output': []}})
+            failure = await message(browser, 'interview_error')
+            await asyncio.wait_for(task, 2)
+            assert failure['code'] == 'connection_lost'
+            assert session.status == 'failed'
+            assert not any(msg['type'] == 'interview_timer_started' for msg in browser.sent._queue)
+        finally:
+            if not task.done(): task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+    asyncio.run(scenario())
+
+
+def test_streamed_bianca_text_keeps_ids_and_stale_opening_ack_is_ignored(tmp_path, monkeypatch):
+    app, session = configure_relay(tmp_path, monkeypatch)
+
+    async def scenario():
+        engine, browser = Socket(), Browser()
+        @asynccontextmanager
+        async def connect(config):
+            yield engine
+        monkeypatch.setattr(app, 'connect_to_engine_with_retry', connect)
+        task = asyncio.create_task(app.interview_relay(browser, session.id))
+        try:
+            request = await message(engine, 'response.create')
+            await engine.emit({'type': 'response.created', 'response': {
+                'id': 'opening', 'metadata': request['response']['metadata']}})
+            await engine.emit({'type': 'response.output_audio.delta', 'response_id': 'opening',
+                               'item_id': 'hello', 'delta': 'AAA='})
+            await engine.emit({'type': 'response.output_audio_transcript.delta', 'response_id': 'opening',
+                               'item_id': 'hello', 'delta': 'Hello'})
+            delta = await message(browser, 'transcript_delta')
+            assert delta == {'type': 'transcript_delta', 'speaker': 'interviewer',
+                             'text': 'Hello', 'item_id': 'hello', 'response_id': 'opening'}
+            await engine.emit({'type': 'response.output_audio_transcript.done', 'response_id': 'opening',
+                               'item_id': 'hello', 'transcript': 'Hello'})
+            final = await message(browser, 'transcript')
+            assert final['item_id'] == 'hello' and final['response_id'] == 'opening'
+            await engine.emit({'type': 'response.done', 'response': {
+                'id': 'opening', 'status': 'completed', 'output': []}})
+            generated = await message(browser, 'opening_generated')
+            assert generated['response_id'] == 'opening' and generated['item_ids'] == ['hello']
+            await browser.emit({'type': 'opening_playback_finished', 'response_id': 'old-opening'})
+            while not browser.incoming.empty(): await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            assert not any(msg['type'] == 'interview_timer_started' for msg in browser.sent._queue)
+            await browser.emit({'type': 'opening_playback_finished', 'response_id': 'opening'})
+            await message(browser, 'interview_timer_started')
+            await browser.emit({'type': 'opening_playback_finished', 'response_id': 'opening'})
+            while not browser.incoming.empty(): await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            assert not any(msg['type'] == 'interview_timer_started' for msg in browser.sent._queue)
+            await browser.close()
+            await asyncio.wait_for(task, 2)
+        finally:
+            if not task.done(): task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("advance_tool", ["next_interview_topic", "finish_interview"])
-def test_relay_covers_all_topics_without_waiting_for_asr_but_waits_to_score(tmp_path, monkeypatch, advance_tool):
+@pytest.mark.parametrize("language", ["en", "fr"])
+def test_relay_covers_all_topics_without_waiting_for_asr_but_waits_to_score(tmp_path, monkeypatch, advance_tool, language):
     monkeypatch.setenv('TALENTSIFT_DATA_DIR', str(tmp_path))
     monkeypatch.setenv('OPENAI_API_KEY', 'unused-test-value')
     monkeypatch.setenv('TALENTSIFT_LIVE_CAPTIONS', '0')
     monkeypatch.setenv('TALENTSIFT_VAD_MODE', 'semantic_vad')
     app = importlib.import_module('app')
-    session = SimpleNamespace(id='synthetic-session', status='pending', started_at=None, language='en')
+    session = SimpleNamespace(id='synthetic-session', status='pending', started_at=None, language=language)
     saved, scored = [], []
     monkeypatch.setattr(app, 'load_session', lambda _: session)
     monkeypatch.setattr(app, 'save_session', lambda _: None)
@@ -82,6 +173,7 @@ def test_relay_covers_all_topics_without_waiting_for_asr_but_waits_to_score(tmp_
         @asynccontextmanager
         async def connect(config):
             assert config['session']['audio']['input']['turn_detection']['type'] == 'semantic_vad'
+            assert config['session']['audio']['input']['transcription']['languages'] == [language]
             yield engine
         monkeypatch.setattr(app, 'connect_to_engine_with_retry', connect)
         task = asyncio.create_task(app.interview_relay(browser, session.id))
@@ -95,7 +187,7 @@ def test_relay_covers_all_topics_without_waiting_for_asr_but_waits_to_score(tmp_
                                'item_id': iid, 'delta': 'AAA='})
             await engine.emit({'type': 'response.output_audio_transcript.done', 'response_id': rid,
                                'item_id': iid, 'transcript': transcript})
-            await engine.emit({'type': 'response.done', 'response': {'id': rid, 'output': [{
+            await engine.emit({'type': 'response.done', 'response': {'id': rid, 'status': 'completed', 'output': [{
                 'id': iid, 'type': 'message', 'role': 'assistant',
                 'content': [{'type': 'audio', 'transcript': transcript}]}]}})
 
@@ -114,7 +206,7 @@ def test_relay_covers_all_topics_without_waiting_for_asr_but_waits_to_score(tmp_
             # A duplicate tool event must not skip the next question.
             await engine.emit({'type': 'response.output_item.done', 'response_id': rid,
                                'item': {'type': 'function_call', 'name': name, 'call_id': rid}})
-            await engine.emit({'type': 'response.done', 'response': {'id': rid, 'output': []}})
+            await engine.emit({'type': 'response.done', 'response': {'id': rid, 'status': 'completed', 'output': []}})
             return result, await message(engine, 'response.create')
 
         async def final_asr(iid, text):
@@ -128,7 +220,7 @@ def test_relay_covers_all_topics_without_waiting_for_asr_but_waits_to_score(tmp_
             await created(opening, 'opening')
             await audio_and_done('opening', 'hello', 'Hello')
             await message(browser, 'opening_generated')
-            await browser.emit({'type': 'opening_playback_finished'})
+            await browser.emit({'type': 'opening_playback_finished', 'response_id': 'opening'})
             await message(browser, 'interview_timer_started')
             await vad('speech_started', 'readiness')
             await vad('speech_stopped', 'readiness')
@@ -141,7 +233,7 @@ def test_relay_covers_all_topics_without_waiting_for_asr_but_waits_to_score(tmp_
             assert progress['current'] == 'experience'
             expected = ['Hello', 'Yes']
             for index, topic in enumerate(TOPICS):
-                question = topic.question('en')
+                question = topic.question(language)
                 assert question in question_request['response']['instructions']
                 assert question_request['response']['tools'] == []
                 assert question_request['response']['metadata']['talentsift_kind'] == 'candidate'
@@ -178,7 +270,7 @@ def test_relay_covers_all_topics_without_waiting_for_asr_but_waits_to_score(tmp_
             await created(closing, 'closing')
             await audio_and_done('closing', 'goodbye', 'Goodbye')
             await message(browser, 'closing_generated')
-            await browser.emit({'type': 'closing_playback_finished'})
+            await browser.emit({'type': 'closing_playback_finished', 'response_id': 'closing'})
             await message(browser, 'interview_complete')
             assert scored == [], 'Must not score before the final answer is stored'
             await final_asr(iid, answer_text)
@@ -221,9 +313,13 @@ def test_primary_disconnect_stops_both_pumps_and_marks_failed(ending, tmp_path, 
             opening = await message(engine, 'response.create')
             await engine.emit({'type': 'response.created', 'response': {
                 'id': 'opening', 'metadata': opening['response']['metadata']}})
-            await engine.emit({'type': 'response.done', 'response': {'id': 'opening', 'output': []}})
+            await engine.emit({'type': 'response.output_audio.delta', 'response_id': 'opening',
+                               'item_id': 'opening-audio', 'delta': 'AAA='})
+            await engine.emit({'type': 'response.done', 'response': {
+                'id': 'opening', 'status': 'completed', 'output': [{
+                    'id': 'opening-audio', 'type': 'message', 'role': 'assistant', 'content': []}]}})
             await message(browser, 'opening_generated')
-            await browser.emit({'type': 'opening_playback_finished'})
+            await browser.emit({'type': 'opening_playback_finished', 'response_id': 'opening'})
             await message(browser, 'interview_timer_started')
             await browser.emit({'type': 'audio', 'data': 'AAA='})
             await message(engine, 'input_audio_buffer.append')
@@ -263,6 +359,55 @@ def test_primary_disconnect_stops_both_pumps_and_marks_failed(ending, tmp_path, 
     asyncio.run(scenario())
 
 
+def test_audio_rate_failure_keeps_the_real_reason_and_cleans_up(tmp_path, monkeypatch, capsys):
+    import base64
+    from access_control import AudioBudget
+    app, session = configure_relay(tmp_path, monkeypatch)
+    now = [0.0]
+    monkeypatch.setattr(app, 'AudioBudget', lambda: AudioBudget(clock=lambda: now[0]))
+
+    async def scenario():
+        engine, browser = Socket(), Browser()
+        @asynccontextmanager
+        async def connect(config):
+            yield engine
+        monkeypatch.setattr(app, 'connect_to_engine_with_retry', connect)
+        task = asyncio.create_task(app.interview_relay(browser, session.id))
+        try:
+            opening = await message(engine, 'response.create')
+            await engine.emit({'type': 'response.created', 'response': {
+                'id': 'opening', 'metadata': opening['response']['metadata']}})
+            await engine.emit({'type': 'response.output_audio.delta', 'response_id': 'opening',
+                               'item_id': 'hello', 'delta': 'AAA='})
+            await engine.emit({'type': 'response.done', 'response': {
+                'id': 'opening', 'status': 'completed', 'output': []}})
+            await message(browser, 'opening_generated')
+            await browser.emit({'type': 'opening_playback_finished', 'response_id': 'opening'})
+            await message(browser, 'interview_timer_started')
+            second = base64.b64encode(bytes(48000)).decode()
+            for _ in range(10):
+                await browser.emit({'type': 'audio', 'data': second})
+                await message(engine, 'input_audio_buffer.append')
+            await browser.emit({'type': 'audio', 'data': second})
+            failure = await message(browser, 'interview_error')
+            await asyncio.wait_for(task, 2)
+            assert failure['code'] == 'audio_rate_exceeded'
+            assert 'Microphone audio' in failure['message']
+            assert session.failure_reason == 'Microphone audio exceeded the allowed streaming rate.'
+            assert session.status == 'failed'
+            assert browser.close_code == 1008
+            assert not [t for t in asyncio.all_tasks() if t.get_name().startswith('interview:')]
+            output = capsys.readouterr().out
+            assert '"session_id": "playback-check"' in output
+            assert '"incoming_pcm_bytes": 48000' in output
+            assert '"audio_seconds_received": 10.0' in output
+            assert second not in output
+        finally:
+            if not task.done(): task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize('ending', ['candidate_stop', 'time_limit'])
 def test_incomplete_coverage_does_not_block_explicit_stop_or_deadline(ending, tmp_path, monkeypatch, capsys):
     monkeypatch.setenv('OPENAI_API_KEY', 'unused-test-value')
@@ -290,9 +435,13 @@ def test_incomplete_coverage_does_not_block_explicit_stop_or_deadline(ending, tm
             opening = await message(engine, 'response.create')
             await engine.emit({'type': 'response.created', 'response': {
                 'id': 'opening', 'metadata': opening['response']['metadata']}})
-            await engine.emit({'type': 'response.done', 'response': {'id': 'opening', 'output': []}})
+            await engine.emit({'type': 'response.output_audio.delta', 'response_id': 'opening',
+                               'item_id': 'opening-audio', 'delta': 'AAA='})
+            await engine.emit({'type': 'response.done', 'response': {
+                'id': 'opening', 'status': 'completed', 'output': [{
+                    'id': 'opening-audio', 'type': 'message', 'role': 'assistant', 'content': []}]}})
             await message(browser, 'opening_generated')
-            await browser.emit({'type': 'opening_playback_finished'})
+            await browser.emit({'type': 'opening_playback_finished', 'response_id': 'opening'})
             await message(browser, 'interview_timer_started')
             if ending == 'candidate_stop':
                 await browser.emit({'type': 'end_interview'})
@@ -308,7 +457,7 @@ def test_incomplete_coverage_does_not_block_explicit_stop_or_deadline(ending, tm
                                    'item': {'type': 'function_call', 'name': 'finish_interview', 'call_id': 'timeout'}})
                 result = await message(engine, 'conversation.item.create')
                 assert result['item']['output'] == 'Interview completion accepted.'
-                await engine.emit({'type': 'response.done', 'response': {'id': 'deadline', 'output': []}})
+                await engine.emit({'type': 'response.done', 'response': {'id': 'deadline', 'status': 'completed', 'output': []}})
                 closing = await message(engine, 'response.create')
                 assert closing['response']['metadata']['talentsift_kind'] == 'closing'
                 output = capsys.readouterr().out

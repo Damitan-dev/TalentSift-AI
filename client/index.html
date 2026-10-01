@@ -377,6 +377,12 @@ async function loadMicrophones() {
 
 async function prepareMicrophone() {
 
+    // Two clicks must not create two processors sending to the same socket.
+    if (microphonePreparing || (ws && ws.readyState !== WebSocket.CLOSED)) return;
+    microphonePreparing = true;
+    const useMicrophoneButton = document.getElementById("use-selected-mic");
+    useMicrophoneButton.disabled = true;
+
     // Hide any previous microphone error.
     document.getElementById(
         "mic-error"
@@ -384,6 +390,8 @@ async function prepareMicrophone() {
 
 
     try {
+
+        await releaseMicrophoneCapture();
 
         // ---------------------------------------------
         // 1. ASK THE BROWSER FOR THE MICROPHONE
@@ -451,10 +459,17 @@ micStream =
         // 2. CREATE THE AUDIO PROCESSING ENGINE
         // ---------------------------------------------
 
-        captureCtx =
-            new AudioContext({
-                sampleRate: SAMPLE_RATE
-            });
+        try {
+            captureCtx = new AudioContext({sampleRate: SAMPLE_RATE});
+        } catch (error) {
+            if (error.name !== "NotSupportedError") throw error;
+            // Devices that cannot open at 24 kHz use their native rate;
+            // the encoder below still sends exactly 24 kHz PCM16.
+            captureCtx = new AudioContext();
+        }
+
+        const captureContext = captureCtx;
+        const pcmEncoder = new Pcm16StreamEncoder(SAMPLE_RATE);
 
             console.log(
                 "🎚️ Capture AudioContext sample rate:",
@@ -499,6 +514,10 @@ micStream =
             // microphone chunk, this function runs.
             micProcessor.onaudioprocess = (event) => {
 
+                // An old callback queued before cleanup cannot join a new stream.
+                if (captureContext !== captureCtx || !candidateAudioEnabled
+                        || !ws || ws.readyState !== WebSocket.OPEN) return;
+
                 // Get the candidate's microphone samples.
                 //
                 // Browser audio arrives as Float32 numbers.
@@ -514,16 +533,15 @@ micStream =
                 // This function already exists lower
                 // down in your index.html.
                 const pcm16 =
-                    floatTo16BitPCM(
-                        float32
+                    pcmEncoder.encode(
+                        float32, event.inputBuffer.sampleRate
                     );
 
 
                 // Only send if our WebSocket to FastAPI
                 // actually exists AND is open.
                 if (
-                    ws
-                    && ws.readyState === WebSocket.OPEN
+                    pcm16.byteLength
                 ) {
 
                     // Convert binary PCM16 into Base64 text
@@ -592,6 +610,8 @@ connectInterviewWebSocket();
 
     } catch (error) {
 
+        await releaseMicrophoneCapture();
+
         // Candidate denied access, microphone does not
         // exist, or browser could not open it.
         console.error(
@@ -610,6 +630,9 @@ connectInterviewWebSocket();
         document.getElementById(
             "mic-error"
         ).hidden = false;
+    } finally {
+        microphonePreparing = false;
+        useMicrophoneButton.disabled = false;
     }
 }
 
@@ -1081,6 +1104,31 @@ let micSource = null;
 // Later this will send those chunks through
 // the WebSocket to FastAPI.
 let micProcessor = null;
+let microphonePreparing = false;
+
+async function releaseMicrophoneCapture() {
+    candidateAudioEnabled = false;
+    const context = captureCtx;
+    // Preserve the recorder's final chunk before closing its shared audio clock.
+    if (interviewRecorder) {
+        try { await interviewRecorder.finish(false); } catch (_) { /* optional recording */ }
+        interviewRecorder = null;
+    }
+    if (micProcessor) {
+        micProcessor.onaudioprocess = null;
+        try { micProcessor.disconnect(); } catch (_) { /* already disconnected */ }
+    }
+    try { micSource?.disconnect(); } catch (_) { /* already disconnected */ }
+    micStream?.getTracks().forEach(track => track.stop());
+    micProcessor = null;
+    micSource = null;
+    micStream = null;
+    captureCtx = null;
+    if (playCtx === context) playCtx = null;
+    if (context && context.state !== "closed") {
+        try { await context.close(); } catch (_) { /* already closed */ }
+    }
+}
 
 
 
@@ -1096,8 +1144,7 @@ let candidateCsrf = null;
         // BIANCA PLAYBACK STATE
         // -----------------------------------------------------
 
-        // Separate AudioContext used for playing
-        // Bianca through the browser speakers.
+        // Playback uses the resumed capture context when it is available.
         let playCtx;
 
 
@@ -1107,6 +1154,13 @@ let candidateCsrf = null;
         // It allows chunks to line up one after another
         // instead of all trying to play immediately.
         let nextPlayTime = 0;
+        const PLAYBACK_BUFFER_SECONDS = 0.06;
+        const biancaPlaybackItems = new Map();
+        const pendingPlaybackAcknowledgements = new Map();
+        const candidateCaptionTurns = new Map();
+        const candidateCaptionAliases = new Map();
+        const finalizedCandidateItems = new Set();
+        let candidateAudioEnabled = false;
 
 
         // -----------------------------------------------------
@@ -1172,28 +1226,11 @@ let candidateCsrf = null;
 
 
 
-        // When true, ignore any leftover audio chunks from
-        // the interrupted Bianca response.
-        let biancaInterrupted = false;
-
-
         // Very short fade.
         // Long enough to avoid a harsh click/cut,
         // short enough that Bianca does not talk over
         // the candidate.
         const INTERRUPT_FADE_MS = 80;
-
-        // Holds the current unfinished candidate transcript.
-        let liveCandidateText = "";
-
-        // Holds the HTML element currently showing
-        // the candidate's unfinished turn.
-        let liveCandidateElement = null;
-
-        // Tracks which OpenAI candidate speech item
-        // the current live transcript paragraph belongs to.
-        let liveCandidateItemId = null;
-
 
         // -----------------------------------------------------
         // INTERVIEW TIMER STATE
@@ -1338,7 +1375,7 @@ let candidateCsrf = null;
         // BIANCA CAPTION STATE
         // -----------------------------------------------------
 
-        // Timer currently revealing Bianca's transcript.
+        // Polls the audio clock for chunk captions and playback completion.
         let interviewerCaptionTimer = null;
 
         // =====================================================
@@ -1350,6 +1387,7 @@ let interviewCompleted = false;
 function showInterviewConnectionError(message) {
     if (interviewFailed || interviewCompleted || interviewEndedEarly) return;
     interviewFailed = true;
+    candidateAudioEnabled = false;
     stopInterviewCountdown();
     micStream?.getTracks().forEach(track => track.stop());
     for (const source of activeBiancaSources.keys()) {
@@ -1453,6 +1491,7 @@ function connectInterviewWebSocket() {
         new WebSocket(
             wsUrl
         );
+    const interviewSocket = ws;
 
 
     // -------------------------------------------------
@@ -1460,6 +1499,7 @@ function connectInterviewWebSocket() {
     // -------------------------------------------------
 
     ws.onopen = () => {
+        if (ws !== interviewSocket) return;
 
         console.log(
             "✅ Real interview WebSocket connected:",
@@ -1497,6 +1537,7 @@ function connectInterviewWebSocket() {
             // -------------------------------------------------
 
            ws.onmessage = (event) => {
+    if (ws !== interviewSocket) return;
 
     // JSON text -> JavaScript object
     const msg =
@@ -1625,7 +1666,11 @@ function connectInterviewWebSocket() {
     // -------------------------------------------------
 
     else if (msg.type === "interrupt") {
-
+        if (msg.response_id) {
+            for (const item of biancaPlaybackItems.values()) {
+                if (item.responseId === msg.response_id) cancelInterviewerCaption(item);
+            }
+        }
         gracefullyInterruptBianca();
     }
 
@@ -1647,161 +1692,27 @@ function connectInterviewWebSocket() {
     playChunk(
         audioBuffer,
         msg.item_id,
-        msg.content_index
+        msg.content_index,
+        msg.response_id
     );
         }
 
 
-    else if (
-    msg.type === "opening_generated"
-        ) {
-
-            console.log(
-                "✅ Opening fully received from server"
-            );
-
-
-            // How much of Bianca's opening is still
-            // waiting in the browser playback queue?
-            const remainingSeconds =
-                playCtx
-                    ? Math.max(
-                        0,
-                        nextPlayTime
-                        - playCtx.currentTime
-                    )
-                    : 0;
-
-
-            const remainingMs =
-                Math.ceil(
-                    remainingSeconds * 1000
-                );
-
-
-            console.log(
-                "⏳ Opening playback remaining:",
-                remainingMs,
-                "ms"
-            );
-
-
-            setTimeout(
-                () => {
-
-                        // Candidate may have ended the interview
-                        // while the opening was still playing.
-                        if (interviewEndedEarly) {
-
-                            console.log(
-                                "⏭️ Opening finish ignored "
-                                + "because interview ended early"
-                            );
-
-                            return;
-                        }
-
-                    if (
-                        ws
-                        && ws.readyState
-                            === WebSocket.OPEN
-                    ) {
-
-                        ws.send(
-                            JSON.stringify({
-                                type:
-                                    "opening_playback_finished"
-                            })
-                        );
-
-
-                        console.log(
-                            "🎙️ Candidate audio now enabled"
-                        );
-                    }
-                },
-
-                remainingMs + 100
-            );
-        }
-
-// -------------------------------------------------
-// OPENAI FINISHED SENDING THE FIXED CLOSING
-// -------------------------------------------------
-
-    else if (
-        msg.type === "closing_generated"
-    ) {
-
-        console.log(
-            "✅ Closing fully received from server"
-        );
-
-
-        // ---------------------------------------------
-        // HOW MUCH BIANCA AUDIO IS STILL QUEUED?
-        // ---------------------------------------------
-        //
-        // nextPlayTime is the browser audio-clock time
-        // at which all currently scheduled Bianca audio
-        // should finish.
-        //
-        // playCtx.currentTime tells us where playback
-        // is right now.
-
-        const remainingSeconds =
-            playCtx
-                ? Math.max(
-                    0,
-                    nextPlayTime - playCtx.currentTime
-                )
-                : 0;
-
-
-        const remainingMs =
-            Math.ceil(
-                remainingSeconds * 1000
-            );
-
-
-        console.log(
-            "⏳ Closing playback remaining:",
-            remainingMs,
-            "ms"
-        );
-
-
-        // Wait until the candidate's browser has reached
-        // the end of the scheduled closing audio.
-        setTimeout(
-            () => {
-
-                if (
-                    ws
-                    && ws.readyState === WebSocket.OPEN
-                ) {
-
-                    ws.send(
-                        JSON.stringify({
-                            type:
-                                "closing_playback_finished"
-                        })
-                    );
-
-
-                    console.log(
-                        "🏁 Browser finished closing playback"
-                    );
-                }
-
-            },
-
-            // Tiny buffer so we do not finish a few
-            // milliseconds before the audio clock.
-            remainingMs + 150
-        );
+    else if (msg.type === "opening_generated") {
+        queuePlaybackAcknowledgement("opening", msg);
     }
-
+    else if (msg.type === "closing_generated") {
+        candidateAudioEnabled = false;
+        queuePlaybackAcknowledgement("closing", msg);
+    }
+    else if (msg.type === "response_finished") {
+        for (const itemId of msg.item_ids || []) {
+            const item = getBiancaPlaybackItem(itemId, msg.response_id);
+            item.generated = true;
+            if (msg.status !== "completed") cancelInterviewerCaption(item);
+        }
+        tickInterviewerPlayback();
+    }
 
     // -------------------------------------------------
     // TALENTSIFT SESSION IS NOW COMPLETED
@@ -1812,6 +1723,7 @@ function connectInterviewWebSocket() {
     ) {
 
         interviewCompleted = true;
+        candidateAudioEnabled = false;
 
         console.log(
             "✅ Interview completed"
@@ -1990,329 +1902,20 @@ function connectInterviewWebSocket() {
     // =================================================
 
     else if (msg.type === "transcript_delta") {
-
-
-        // =============================================
-        // CANDIDATE LIVE TRANSCRIPT
-        // =============================================
-
-        if (msg.speaker === "candidate") {
-
-    // ---------------------------------------------
-    // DETECT A NEW CANDIDATE SPEECH TURN
-    // ---------------------------------------------
-    //
-    // Every OpenAI candidate speech item has its
-    // own item_id.
-    //
-    // If the incoming fragment belongs to a different
-    // item, it must NOT continue inside the previous
-    // candidate answer paragraph.
-
-    if (
-        msg.item_id &&
-        msg.item_id !== liveCandidateItemId
-    ) {
-
-        // We have started a different candidate turn.
-        liveCandidateItemId =
-            msg.item_id;
-
-        liveCandidateText =
-            "";
-
-        liveCandidateElement =
-            null;
+        if (msg.speaker === "candidate") showCandidateDelta(msg);
+        else if (msg.speaker === "interviewer") queueInterviewerCaption(msg);
     }
-
-
-    // ---------------------------------------------
-    // ADD THIS TURN'S NEWEST TEXT FRAGMENT
-    // ---------------------------------------------
-
-    liveCandidateText +=
-        msg.text;
-
-
-    // ---------------------------------------------
-    // CREATE ONE PARAGRAPH FOR THIS TURN
-    // ---------------------------------------------
-
-    if (!liveCandidateElement) {
-
-        const transcript =
-            document.getElementById(
-                "transcript"
-            );
-
-
-        liveCandidateElement =
-            document.createElement(
-                "p"
-            );
-
-
-        liveCandidateElement.className =
-            "transcript-live candidate";
-
-
-        // Keep the OpenAI item ID on the HTML element
-        // as well. This will help us finalize the
-        // correct paragraph later.
-        if (msg.item_id) {
-
-            liveCandidateElement.dataset.itemId =
-                msg.item_id;
-        }
-
-
-        transcript.appendChild(
-            liveCandidateElement
-        );
+    else if (msg.type === "transcript_link") {
+        linkCandidateCaption(msg.provisional_item_id, msg.item_id);
     }
-
-
-    // Update only THIS candidate turn's paragraph.
-    liveCandidateElement.textContent =
-        `candidate: ${liveCandidateText}`;
+    else if (msg.type === "transcript_retract" && msg.item_id) {
+        finalizedCandidateItems.add(msg.item_id);
+        candidateCaptionTurns.get(msg.item_id)?.element.remove();
+        candidateCaptionTurns.delete(msg.item_id);
     }
-
-        // ---------------------------------------------
-        // KEEP THE NEWEST TEXT VISIBLE
-        // ---------------------------------------------
-
-        const transcript =
-            document.getElementById(
-                "transcript"
-            );
-
-
-        transcript.scrollTop =
-            transcript.scrollHeight;
-    }
-
-
-    // =================================================
-    // FINAL TRANSCRIPT
-    // =================================================
-
-    else if (
-        msg.type === "transcript_retract"
-        && msg.item_id
-    ) {
-        // Live captions are provisional. If the authoritative
-        // interview transcription is empty, remove that preview.
-        const transcript = document.getElementById("transcript");
-        for (const element of transcript.querySelectorAll(
-            ".candidate[data-item-id]"
-        )) {
-            if (element.dataset.itemId === msg.item_id) {
-                element.remove();
-            }
-        }
-        if (liveCandidateItemId === msg.item_id) {
-            liveCandidateItemId = null;
-            liveCandidateText = "";
-            liveCandidateElement = null;
-        }
-    }
-
     else if (msg.type === "transcript") {
-
-        const transcript =
-            document.getElementById(
-                "transcript"
-            );
-
-
-        // ---------------------------------------------
-        // FINAL CANDIDATE TRANSCRIPT
-        // ---------------------------------------------
-
-        if (msg.speaker === "candidate") {
-
-            const transcript =
-                document.getElementById(
-                    "transcript"
-                );
-
-
-            // ---------------------------------------------
-            // FIND THE EXACT CANDIDATE TURN
-            // ---------------------------------------------
-            //
-            // A completed transcription may arrive later
-            // than expected.
-            //
-            // Therefore we must finalize the paragraph that
-            // has the SAME OpenAI item_id, not simply the
-            // most recently created candidate paragraph.
-
-            let candidateElement = null;
-
-
-            if (msg.item_id) {
-
-                const candidateElements =
-                    transcript.querySelectorAll(
-                        ".candidate[data-item-id]"
-                    );
-
-
-                for (
-                    const element
-                    of candidateElements
-                ) {
-
-                    if (
-                        element.dataset.itemId
-                        === msg.item_id
-                    ) {
-
-                        candidateElement =
-                            element;
-
-                        break;
-                    }
-                }
-            }
-
-
-            // ---------------------------------------------
-            // FINALIZE THE MATCHING LIVE PARAGRAPH
-            // ---------------------------------------------
-
-            if (candidateElement) {
-
-                candidateElement.textContent =
-                    `candidate: ${msg.text}`;
-
-
-                candidateElement.className =
-                    "transcript-turn candidate";
-            }
-
-
-            // ---------------------------------------------
-            // NO LIVE DELTA PARAGRAPH?
-            // ---------------------------------------------
-            //
-            // Sometimes the final transcript can arrive
-            // without us having displayed useful deltas.
-            //
-            // We still need to show the candidate's turn.
-
-            else {
-
-                candidateElement =
-                    document.createElement(
-                        "p"
-                    );
-
-
-                candidateElement.className =
-                    "transcript-turn candidate";
-
-
-                candidateElement.textContent =
-                    `candidate: ${msg.text}`;
-
-
-                if (msg.item_id) {
-
-                    candidateElement.dataset.itemId =
-                        msg.item_id;
-                }
-
-
-                transcript.appendChild(
-                    candidateElement
-                );
-            }
-
-
-            // ---------------------------------------------
-            // RESET LIVE STATE ONLY IF THIS WAS THE
-            // CURRENTLY ACTIVE CANDIDATE TURN
-            // ---------------------------------------------
-            //
-            // A late transcript from an older answer must
-            // not erase the live state of a newer answer.
-
-            if (
-                msg.item_id
-                && msg.item_id
-                    === liveCandidateItemId
-            ) {
-
-                liveCandidateText =
-                    "";
-
-                liveCandidateElement =
-                    null;
-
-                liveCandidateItemId =
-                    null;
-            }
-        }
-
-        // ---------------------------------------------
-        // FINAL BIANCA TRANSCRIPT
-        // ---------------------------------------------
-
-        else if (
-            msg.speaker === "interviewer"
-        ) {
-
-            // If this Bianca response was interrupted,
-            // do not start revealing the rest of its
-            // completed transcript.
-            //
-            // The candidate did not hear that remaining part.
-            if (biancaInterrupted) {
-
-                console.log(
-                    "⏭️ Ignoring unheard Bianca transcript tail"
-                );
-
-                return;
-            }
-
-
-            showInterviewerTranscriptWithPlayback(
-                msg.text
-            );
-        }
-
-
-        // ---------------------------------------------
-        // FALLBACK
-        // ---------------------------------------------
-
-        else {
-
-            const turn =
-                document.createElement(
-                    "p"
-                );
-
-
-            turn.className =
-                `transcript-turn ${msg.speaker}`;
-
-
-            turn.textContent =
-                `${msg.speaker}: ${msg.text}`;
-
-
-            transcript.appendChild(
-                turn
-            );
-        }
-
-
-        transcript.scrollTop =
-            transcript.scrollHeight;
+        if (msg.speaker === "candidate") showCandidateFinal(msg);
+        else if (msg.speaker === "interviewer") queueInterviewerCaption(msg, true);
     }
 
         // This closes:
@@ -2326,6 +1929,7 @@ function connectInterviewWebSocket() {
             // -------------------------------------------------
 
             ws.onclose = (event) => {
+                if (ws !== interviewSocket) return;
                 if (!interviewCompleted && !interviewEndedEarly && !interviewFailed) {
                     showInterviewConnectionError("The interview connection was lost. Contact the recruiter for a new invitation.");
                 }
@@ -2337,6 +1941,12 @@ function connectInterviewWebSocket() {
                 }
                 activeBiancaSources.clear();
                 void interviewRecorder?.finish(false);
+                // Recording needs the shared audio clock through its final chunk.
+                candidateAudioEnabled = false;
+                if (micProcessor) {
+                    micProcessor.onaudioprocess = null;
+                    try { micProcessor.disconnect(); } catch (_) { /* already disconnected */ }
+                }
                 micStream?.getTracks().forEach(track => track.stop());
 
                 console.log(
@@ -2362,6 +1972,7 @@ function connectInterviewWebSocket() {
             // -------------------------------------------------
 
             ws.onerror = (error) => {
+                if (ws !== interviewSocket) return;
 
                 console.error(
                     "WebSocket error:",
@@ -2380,6 +1991,45 @@ function connectInterviewWebSocket() {
         // -----------------------------------------------------
         // FLOAT32 -> PCM16
         // -----------------------------------------------------
+
+        class Pcm16StreamEncoder {
+            constructor(targetRate) {
+                this.targetRate = targetRate;
+                this.inputRate = null;
+            }
+
+            encode(samples, inputRate) {
+                if (!Number.isFinite(inputRate) || inputRate <= 0) {
+                    throw new Error("Microphone audio has no valid sample rate.");
+                }
+                // Web Audio normally resamples into our requested 24 kHz context.
+                if (inputRate === this.targetRate) return floatTo16BitPCM(samples);
+                if (this.inputRate !== inputRate) {
+                    this.inputRate = inputRate;
+                    this.ratio = inputRate / this.targetRate;
+                    this.remaining = this.ratio;
+                    this.sum = 0;
+                }
+                // Average each target sample's input interval. Preserve partial
+                // intervals across callbacks, especially for 44.1 -> 24 kHz.
+                const output = [];
+                for (const sample of samples) {
+                    let available = 1;
+                    while (available > 1e-10) {
+                        const weight = Math.min(available, this.remaining);
+                        this.sum += sample * weight;
+                        this.remaining -= weight;
+                        available -= weight;
+                        if (this.remaining < 1e-10) {
+                            output.push(this.sum / this.ratio);
+                            this.remaining = this.ratio;
+                            this.sum = 0;
+                        }
+                    }
+                }
+                return floatTo16BitPCM(new Float32Array(output));
+            }
+        }
 
         function floatTo16BitPCM(float32) {
 
@@ -2525,7 +2175,7 @@ function connectInterviewWebSocket() {
         // PLAY ONE BIANCA PCM16 AUDIO CHUNK
         // -----------------------------------------------------
 
-function playChunk(arrayBuffer, itemId, contentIndex) {
+function playChunk(arrayBuffer, itemId, contentIndex, responseId) {
     if (!playCtx) playCtx = new AudioContext({sampleRate: SAMPLE_RATE});
     if (!biancaGainNode) {
         biancaGainNode = playCtx.createGain();
@@ -2534,6 +2184,17 @@ function playChunk(arrayBuffer, itemId, contentIndex) {
         interviewRecorder?.addInterviewer(biancaGainNode);
     }
     if (itemId && interruptedBiancaItemIds.has(itemId)) return;
+    if (!itemId || !arrayBuffer.byteLength || arrayBuffer.byteLength % 2) {
+        showInterviewConnectionError("The interviewer sent invalid audio. Contact the recruiter for a new invitation.");
+        return;
+    }
+    const playbackItem = getBiancaPlaybackItem(itemId, responseId);
+    if (playbackItem.cancelled) return;
+    if (playCtx.state !== "running") {
+        void playCtx.resume().catch(() => {
+            showInterviewConnectionError("Audio playback could not start. Check your browser audio settings.");
+        });
+    }
 
     const isNewItem = currentBiancaItemId !== itemId;
     const previousItem = currentBiancaItemId;
@@ -2552,7 +2213,6 @@ function playChunk(arrayBuffer, itemId, contentIndex) {
         nextPlayTime = playCtx.currentTime;
         biancaGainNode.gain.cancelScheduledValues(playCtx.currentTime);
         biancaGainNode.gain.setValueAtTime(1, playCtx.currentTime);
-        biancaInterrupted = false;
     }
 
     const pcm16 = new Int16Array(arrayBuffer);
@@ -2564,9 +2224,22 @@ function playChunk(arrayBuffer, itemId, contentIndex) {
     source.buffer = buffer;
     source.connect(biancaGainNode);
     activeBiancaSources.set(source, itemId);
-    source.onended = () => activeBiancaSources.delete(source);
+    playbackItem.pendingSources += 1;
+    source.onended = () => {
+        activeBiancaSources.delete(source);
+        playbackItem.pendingSources = Math.max(0, playbackItem.pendingSources - 1);
+        tickInterviewerPlayback();
+    };
 
-    const startTime = Math.max(playCtx.currentTime, nextPlayTime);
+    const startTime = Math.max(playCtx.currentTime + PLAYBACK_BUFFER_SECONDS, nextPlayTime);
+    playbackItem.startAt ??= startTime;
+    playbackItem.lastAudioStartAt = startTime;
+    playbackItem.endAt = startTime + buffer.duration;
+    playbackItem.hasAudio = true;
+    for (const cue of playbackItem.cues) {
+        if (cue.at === null) cue.at = startTime;
+        if (cue.final) cue.at = playbackItem.endAt;
+    }
     if (isNewItem) {
         currentBiancaItemId = itemId;
         currentBiancaContentIndex = contentIndex ?? 0;
@@ -2575,6 +2248,7 @@ function playChunk(arrayBuffer, itemId, contentIndex) {
     source.start(startTime);
     nextPlayTime = startTime + buffer.duration;
     biancaScheduledEndAt = nextPlayTime;
+    ensurePlaybackTicker();
 }
 
 // -----------------------------------------------------
@@ -2615,7 +2289,7 @@ function gracefullyInterruptBianca() {
     const itemId = currentBiancaItemId;
     if (interruptedBiancaItemIds.has(itemId)) return;
     interruptedBiancaItemIds.add(itemId);
-    biancaInterrupted = true;
+    cancelInterviewerCaption(getBiancaPlaybackItem(itemId));
 
     // Keep the old item's position separate from a reply that arrives during fade-out.
     const now = playCtx.currentTime;
@@ -2648,8 +2322,6 @@ function gracefullyInterruptBianca() {
         // An old cleanup callback must never reset a newer reply's queue or captions.
         if (currentBiancaItemId === itemId) {
             nextPlayTime = playCtx.currentTime;
-            if (interviewerCaptionTimer) clearInterval(interviewerCaptionTimer);
-            interviewerCaptionTimer = null;
             biancaPlaybackStartedAt = null;
             biancaScheduledEndAt = null;
         }
@@ -2668,138 +2340,159 @@ function gracefullyInterruptBianca() {
     // REVEAL BIANCA TRANSCRIPT DURING AUDIO PLAYBACK
     // -----------------------------------------------------
 
-    function showInterviewerTranscriptWithPlayback(text) {
-
-        const transcript =
-            document.getElementById(
-                "transcript"
-            );
-
-
-        // Create one paragraph for Bianca's current turn.
-        const turn =
-            document.createElement(
-                "p"
-            );
-
-
-        turn.className =
-            "transcript-live interviewer";
-
-
-        transcript.appendChild(
-            turn
-        );
-
-
-        // Split the final transcript into words.
-        //
-        // Example:
-        //
-        // "Tell me about your backend"
-        //
-        // becomes:
-        //
-        // [
-        //   "Tell",
-        //   "me",
-        //   "about",
-        //   "your",
-        //   "backend"
-        // ]
-        const words =
-            text.split(/\s+/);
-
-
-        let wordIndex = 0;
-
-
-        // -------------------------------------------------
-        // HOW MUCH BIANCA AUDIO IS STILL QUEUED?
-        // -------------------------------------------------
-
-        const remainingAudioSeconds =
-            playCtx
-                ? Math.max(
-                    0.1,
-                    nextPlayTime - playCtx.currentTime
-                )
-                : 0.1;
-
-
-        // Convert seconds -> milliseconds.
-        const remainingAudioMs =
-            remainingAudioSeconds * 1000;
-
-
-        // Roughly distribute the remaining words over
-        // Bianca's remaining playback time.
-        const msPerWord =
-            Math.max(
-                40,
-                remainingAudioMs / words.length
-            );
-
-
-        // If an old caption timer somehow still exists,
-        // stop it before beginning another Bianca turn.
-        if (interviewerCaptionTimer) {
-
-            clearInterval(
-                interviewerCaptionTimer
-            );
-        }
-
-
-        interviewerCaptionTimer =
-            setInterval(
-                () => {
-
-                    wordIndex += 1;
-
-
-                    // Show all words up to the current point.
-                    turn.textContent =
-                        `interviewer: ${
-                            words
-                                .slice(
-                                    0,
-                                    wordIndex
-                                )
-                                .join(" ")
-                        }`;
-
-
-                    transcript.scrollTop =
-                        transcript.scrollHeight;
-
-
-                    // Finished revealing the sentence.
-                    if (
-                        wordIndex >= words.length
-                    ) {
-
-                        clearInterval(
-                            interviewerCaptionTimer
-                        );
-
-
-                        interviewerCaptionTimer =
-                            null;
-
-
-                        // Mark this as a completed transcript.
-                        turn.className =
-                            "transcript-turn interviewer";
-                    }
-
-                },
-                msPerWord
-            );
+function getBiancaPlaybackItem(itemId, responseId) {
+    if (!biancaPlaybackItems.has(itemId)) {
+        biancaPlaybackItems.set(itemId, {
+            itemId, responseId, startAt: null, endAt: null, lastAudioStartAt: null,
+            pendingSources: 0, hasAudio: false, generated: false, cancelled: false,
+            text: "", cues: [], element: null
+        });
     }
+    const item = biancaPlaybackItems.get(itemId);
+    if (responseId) item.responseId = responseId;
+    return item;
+}
 
+function ensurePlaybackTicker() {
+    if (!interviewerCaptionTimer) {
+        // Poll the audio clock, never an estimated words-per-second timer.
+        interviewerCaptionTimer = setInterval(tickInterviewerPlayback, 40);
+    }
+}
 
+function queueInterviewerCaption(msg, final = false) {
+    if (!msg.item_id || !msg.text) return;
+    const item = getBiancaPlaybackItem(msg.item_id, msg.response_id);
+    if (item.cancelled || interruptedBiancaItemIds.has(msg.item_id)) return;
+    item.text = final ? msg.text : item.text + msg.text;
+    // These are chunk-level cues, not word timestamps. Text can lead audio
+    // generation, so hold it until its associated queued sound starts playing.
+    item.cues.push({
+        at: item.hasAudio ? (final ? item.endAt : item.lastAudioStartAt) : null,
+        text: item.text, final
+    });
+    ensurePlaybackTicker();
+    tickInterviewerPlayback();
+}
 
+function cancelInterviewerCaption(item) {
+    item.cancelled = true;
+    item.cues = [];
+    if (item.element) {
+        item.element.className = "transcript-turn interviewer";
+        item.element.dataset.interrupted = "true";
+    }
+}
+
+function tickInterviewerPlayback() {
+    if (interviewFailed || interviewEndedEarly || interviewCompleted) {
+        if (interviewerCaptionTimer) clearInterval(interviewerCaptionTimer);
+        interviewerCaptionTimer = null;
+        return;
+    }
+    if (!playCtx || playCtx.state !== "running") return;
+    const transcript = document.getElementById("transcript");
+    for (const item of biancaPlaybackItems.values()) {
+        if (item.cancelled || !item.hasAudio) continue;
+        while (item.cues.length) {
+            const cue = item.cues[0];
+            if (cue.at === null || playCtx.currentTime < cue.at) break;
+            if (cue.final && (!item.generated || item.pendingSources)) break;
+            item.cues.shift();
+            if (!item.element) {
+                item.element = document.createElement("p");
+                item.element.dataset.itemId = item.itemId;
+                transcript.appendChild(item.element);
+            }
+            item.element.textContent = `interviewer: ${cue.text}`;
+            item.element.className = cue.final
+                ? "transcript-turn interviewer" : "transcript-live interviewer";
+            transcript.scrollTop = transcript.scrollHeight;
+        }
+    }
+    for (const [kind, pending] of pendingPlaybackAcknowledgements) {
+        const items = pending.itemIds.map(id => biancaPlaybackItems.get(id));
+        if (!items.length || items.some(item => !item || !item.hasAudio
+            || item.cancelled || item.pendingSources
+            || playCtx.currentTime + 0.001 < item.endAt)) continue;
+        if (!ws || ws.readyState !== WebSocket.OPEN) continue;
+        ws.send(JSON.stringify({
+            type: `${kind}_playback_finished`, response_id: pending.responseId
+        }));
+        pendingPlaybackAcknowledgements.delete(kind);
+        if (kind === "opening") {
+            candidateAudioEnabled = true;
+            console.log("🎙️ Opening sources ended — candidate audio enabled");
+        }
+    }
+    const waiting = pendingPlaybackAcknowledgements.size || activeBiancaSources.size
+        || [...biancaPlaybackItems.values()].some(item => !item.cancelled && item.cues.length);
+    if (!waiting && interviewerCaptionTimer) {
+        clearInterval(interviewerCaptionTimer);
+        interviewerCaptionTimer = null;
+    }
+}
+
+function queuePlaybackAcknowledgement(kind, msg) {
+    if (!msg.response_id || !msg.item_ids?.length) {
+        showInterviewConnectionError("The interviewer did not complete its audio response. Contact the recruiter.");
+        return;
+    }
+    for (const itemId of msg.item_ids) {
+        getBiancaPlaybackItem(itemId, msg.response_id).generated = true;
+    }
+    pendingPlaybackAcknowledgements.set(kind, {
+        responseId: msg.response_id, itemIds: msg.item_ids
+    });
+    ensurePlaybackTicker();
+    tickInterviewerPlayback();
+}
+
+function candidateTurn(itemId) {
+    if (!candidateCaptionTurns.has(itemId)) {
+        const element = document.createElement("p");
+        element.dataset.itemId = itemId;
+        element.className = "transcript-live candidate";
+        document.getElementById("transcript").appendChild(element);
+        candidateCaptionTurns.set(itemId, {element, text: ""});
+    }
+    return candidateCaptionTurns.get(itemId);
+}
+
+function showCandidateDelta(msg) {
+    const itemId = candidateCaptionAliases.get(msg.item_id) || msg.item_id;
+    if (!itemId || finalizedCandidateItems.has(itemId)) return;
+    const turn = candidateTurn(itemId);
+    turn.text += msg.text;
+    turn.element.textContent = `candidate: ${turn.text}`;
+    const transcript = document.getElementById("transcript");
+    transcript.scrollTop = transcript.scrollHeight;
+}
+
+function linkCandidateCaption(provisionalId, itemId) {
+    if (!provisionalId || !itemId) return;
+    candidateCaptionAliases.set(provisionalId, itemId);
+    const provisional = candidateCaptionTurns.get(provisionalId);
+    if (!provisional) return;
+    if (finalizedCandidateItems.has(itemId) || candidateCaptionTurns.has(itemId)) {
+        provisional.element.remove();
+    } else {
+        provisional.element.dataset.itemId = itemId;
+        candidateCaptionTurns.set(itemId, provisional);
+    }
+    candidateCaptionTurns.delete(provisionalId);
+}
+
+function showCandidateFinal(msg) {
+    if (!msg.item_id) return;
+    finalizedCandidateItems.add(msg.item_id);
+    const turn = candidateTurn(msg.item_id);
+    turn.text = msg.text;
+    turn.element.textContent = `candidate: ${msg.text}`;
+    turn.element.className = "transcript-turn candidate";
+    const transcript = document.getElementById("transcript");
+    transcript.scrollTop = transcript.scrollHeight;
+}
 
 // -----------------------------------------------------
 // CALCULATE HOW MUCH BIANCA AUDIO WAS ACTUALLY HEARD

@@ -382,6 +382,47 @@ def test_pcm_budget_rejects_invalid_and_accelerated_audio():
             AudioBudget().accept(invalid)
 
 
+@pytest.mark.parametrize('speed', [1, 1.019])
+def test_pcm_budget_allows_a_full_interview_with_small_clock_drift(speed):
+    import base64
+    from access_control import AudioBudget
+    now = [0.0]
+    budget = AudioBudget(clock=lambda: now[0])
+    chunk = base64.b64encode(bytes(1024 * 2)).decode()
+    for _ in range(int(600 * 24000 * speed / 1024)):
+        now[0] += 1024 / (24000 * speed)
+        budget.accept(chunk)
+
+
+def test_pcm_budget_accepts_bounded_network_catchup_but_not_duplicate_streams():
+    import base64
+    from access_control import AudioBudget, AudioRateError
+    now = [0.0]
+    budget = AudioBudget(clock=lambda: now[0])
+    second = base64.b64encode(bytes(48000)).decode()
+    # A ten-second network backlog arrives in a burst, then normal audio resumes.
+    now[0] += 10
+    for _ in range(10):
+        budget.accept(second)
+    for _ in range(600):
+        now[0] += 1
+        budget.accept(second)
+    # Two capture pipelines (or unconverted 48 kHz) must still be bounded.
+    for _ in range(12):
+        now[0] += 1
+        try:
+            budget.accept(second)
+            budget.accept(second)
+        except AudioRateError as error:
+            assert error.status == 429
+            assert error.details['incoming_pcm_bytes'] == 48000
+            assert error.details['audio_seconds_received'] > 0
+            assert second not in str(error.details)
+            break
+    else:
+        pytest.fail('A sustained double-rate stream escaped the budget')
+
+
 def test_ws_rechecks_invitation_expiry_and_quota_after_microphone_setup(env, http, monkeypatch):
     module, store, job = env
     _, _, token = invite(http, store, job)

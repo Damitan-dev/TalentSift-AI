@@ -125,3 +125,31 @@ at every topic, both languages, late/duplicate audio, cancellation, the deadline
 candidate stop and transcript-order/scoring behavior. Update and cumulative
 patches apply cleanly to their baselines. No live microphone/OpenAI interview or
 deployment was performed. See [the coverage guide](docs/interview_coverage.md).
+
+## 1 October 2026 — interview language, responsive captions and playback completion
+
+Both transcribers now use one normalized English/French language hint and shared
+recognition context. Replaced the final transcriber's older `language` field with
+`languages`, added literal candidate-name/job-title hints, and clarified that
+accents and isolated technical terms must not switch Bianca's language. These
+settings guide recognition without translating speech or inventing answers.
+
+Enabled Bianca's text deltas with item/response identity. Replaced the estimated
+word animation with per-item chunk captions driven by the browser audio clock.
+Opening and closing now require successful generation, playable audio and matching
+audio-source completion acknowledgements. A small scheduling buffer protects
+queue startup. Candidate audio begins after the opening acknowledgement.
+
+Live captions default to `low`, retain bounded startup audio, display provisional
+IDs immediately, and reconcile with main IDs without repeating words. Final text
+wins over delayed previews. Empty speech and failed unlinked previews are removed.
+The primary VAD, reply scheduler, final-transcript scoring gate, access control,
+usage limits and recording consent remain intact.
+
+Validation: all 95 Python tests and 17 JavaScript tests passed, including complete
+simulated interviews in both languages, canceled/empty openings, stale/duplicate
+acknowledgements, suspended clocks, interrupted captions and caption failure
+cleanup. JavaScript syntax and diff whitespace checks passed. No paid OpenAI call,
+real microphone accuracy measurement or deployment was performed. Chunk captions
+are approximate; exact word alignment and physical-device playback still require
+further validation. See [the retest guide](docs/audio_language_and_playback.md).
